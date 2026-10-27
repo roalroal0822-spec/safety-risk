@@ -107,6 +107,17 @@ class KB:
                     n += 1
             self.files.append({"file": doc.relpath, "kind": "평가 대상 작업", "rows": n})
 
+    def learn(self, items):
+        """현장에서 보탠 낱말(작업 설명에 실제로 있던 말)을 위험요인의 찾는 낱말에 더한다."""
+        for x in items:
+            h = self.hazards.get(x["code"])
+            if h and x["word"] not in h["words"]:
+                h["words"].append(x["word"])
+                h.setdefault("learned", []).append(x["word"])
+        for inc in self.incidents:
+            inc["codes"] = self.codes_in(inc["text"])
+        return self
+
     # ------------------------------------------------------------ 규정
     def article(self, topic):
         if not self.reg:
@@ -136,6 +147,7 @@ class KB:
             ("heat_stop", r"폭염", r"(\d+)\s*℃\s*이상이면\s*오후", 35, "폭염 작업 단축 기준(체감온도 ℃)"),
             ("height", r"높은 곳", r"높이\s*(\d+)\s*(?:미터|m)", 2, "작업발판·안전대 기준 높이(m)"),
             ("lookback", r"수시평가", r"(\d+)\s*개월", 12, "아차사고 반영 기간(개월)"),
+            ("periodic", r"위험성평가의 실시", r"정기평가\(매년\s*(\d+)\s*회", 1, "정기평가(매년, 회)"),
         ]
         for key, topic, rx, default, label in spec:
             a = self.article(topic)

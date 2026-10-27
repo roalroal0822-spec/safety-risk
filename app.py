@@ -13,11 +13,12 @@ from core.llm import LLM
 from core.server import App, HttpError, Response, file_response
 from core.sources import safe_parts
 from core.store import Store
+from core.xlsx import CTYPE as XLSX, workbook
 
 import assess
 from kb import KB
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 HERE = Path(__file__).resolve().parent
 SAMPLE = HERE / "sample_data"
 IMG = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
@@ -53,8 +54,12 @@ def _copy_sample():
             shutil.copy2(p, dst)
 
 
+def learned():
+    return store.read("learned.json", {"items": []})["items"]
+
+
 def reload():
-    k = KB(KB_ROOT).load()
+    k = KB(KB_ROOT).load().learn(learned())
     k.incidents += [dict(i, codes=k.codes_in(i["text"])) for i in user_incidents()]
     STATE["kb"] = k
     return k
@@ -96,6 +101,7 @@ def put_a(a):
 @app.get("/api/state")
 def state(req):
     k = kb()
+    today = date.today().isoformat()
     items = assessments()
     rows = []
     for a in items:
@@ -106,10 +112,12 @@ def state(req):
     open_high = [{"aid": a["id"], "work": a["work"], "fac": a["fac"], "item": i["name"], "R": i["R"], "measure": m["text"],
                   "owner": m["owner"], "due": m["due"]}
                  for a in items for i in a["items"] if i["confirmed"] and i["level"] == "bad" for m in i["measures"] if not m["done"]]
-    today = date.today().isoformat()
     return {
         "kb": k.summary(), "tasks": k.tasks, "incidents": sorted(k.incidents, key=lambda x: x["date"], reverse=True),
-        "hazards": [{"code": h["code"], "name": h["name"], "type": h["type"], "L": h["L"], "S": h["S"], "words": h["words"],
+        "periodic": {"basis": k.basis["periodic"], "year": today[:4],
+                     "tasks": [dict(t, **assess.task_status(k, t, items, today[:4])) for t in k.tasks]},
+        "learned": learned(),
+        "hazards": [{"code": h["code"], "name": h["name"], "type": h["type"], "L": h["L"], "S": h["S"], "words": h["words"], "learned": h.get("learned", []),
                      "measures": h["measures"], "law": h["law"], "src": h["src"]} for h in k.hazards.values()],
         "assessments": rows,
         "dash": {"assessments": len(items), "open_high": open_high[:30], "n_open_high": len(open_high),
@@ -199,8 +207,34 @@ def update(req):
 @app.post("/api/assess/<aid>/add")
 def add(req):
     a = get_a(req.params["aid"])
-    assess.add_item(kb(), a, (req.json or {}).get("code"))
+    b = req.json or {}
+    code, word = b.get("code"), (b.get("word") or "").strip()
+    k = kb()
+    if code not in k.hazards:
+        raise HttpError(400, "위험요인 목록에 없는 코드입니다")
+    if word:
+        # 보탤 낱말은 이 작업 설명에 실제로 있는 말이어야 한다(지어낸 낱말로 목록이 넓어지지 않게)
+        if not 2 <= len(word) <= 20 or word not in f"{a['work']} {a['text']}":
+            raise HttpError(400, "작업 이름이나 설명에 실제로 있는 말(2~20자)을 적어 주세요")
+        if word not in k.hazards[code]["words"]:
+            items = learned()
+            items.append({"code": code, "word": word, "aid": a["id"], "work": a["work"], "at": date.today().isoformat()})
+            store.write("learned.json", {"items": items})
+            log("찾는 낱말 보태기", f"{code} {k.hazards[code]['name']} ← '{word}'")
+            k = reload()
+    assess.add_item(k, a, code, word)
+    log("위험요인 추가", f"{a['work']} {code}")
     return put_a(a)
+
+
+@app.post("/api/learned/remove")
+def learned_remove(req):
+    b = req.json or {}
+    items = [x for x in learned() if not (x["code"] == b.get("code") and x["word"] == b.get("word"))]
+    store.write("learned.json", {"items": items})
+    log("보탠 낱말 빼기", f"{b.get('code')} '{b.get('word')}'")
+    reload()
+    return state(req)
 
 
 @app.post("/api/assess/<aid>/remove")
@@ -272,6 +306,41 @@ def export_sheet(req):
     data, ctype = export(blocks, fmt)
     log("위험성평가표 내보내기", a["work"])
     return file_response(data, f"위험성평가표_{a['fac']}_{a['work'][:20]}.{fmt}", ctype)
+
+
+@app.post("/api/assess/<aid>/xlsx")
+def export_xlsx(req):
+    a = get_a(req.params["aid"])
+    items = [i for i in a["items"] if i["confirmed"]]
+    rows = [[n, i["name"], i["type"], i["L"], i["S"], i["R"], i["level_label"], _mlist(i), i["R_after"],
+             "; ".join(r["text"] for r in i["reasons"]), i["law"] + (f" / {i['basis']['reg']} {i['basis']['label']}" if i.get("basis") else "")]
+            for n, i in enumerate(items, 1)]
+    data = workbook([("위험성평가표", ["번호", "유해·위험요인", "재해 형태", "가능성", "중대성", "위험성", "판단", "감소대책(담당·기한)", "개선 후", "판단 이유", "관련 기준"],
+                      rows, [6, 30, 12, 8, 8, 8, 16, 50, 8, 50, 40])],
+                    note=f"{a['fac']} · {a['work']} · 평가일 {a['created']} · {a['status']} · 작업 설명: {a['text']}")
+    log("위험성평가표 엑셀", a["work"])
+    return file_response(data, f"위험성평가표_{a['fac']}_{a['work'][:20]}.xlsx", XLSX)
+
+
+@app.post("/api/ledger-xlsx")
+def ledger_xlsx(req):
+    """위험성평가 대장: 모든 평가의 위험요인 한 줄씩 + 정기 평가 대상 작업 현황."""
+    s = state(req)
+    rows = []
+    for a in assessments():
+        st = assess.stats(a)
+        for i in a["items"]:
+            if i["confirmed"]:
+                rows.append([a["created"], a["fac"], a["dept"], a["work"], a["status"], "작업 시작 가능" if st["ready"] else "작업 전 조치 필요",
+                             i["name"], i["L"], i["S"], i["R"], i["level_label"], sum(1 for m in i["measures"] if not m["done"]),
+                             "수시평가 필요" if a["reassess"] else ""])
+    tasks = [[t["dept"], t["fac"], t["work"], t["cycle"], t["state"], t["date"]] for t in s["periodic"]["tasks"]]
+    data = workbook([("평가 대장", ["평가일", "시설", "부서", "작업", "상태", "판정", "위험요인", "가능성", "중대성", "위험성", "판단", "미완료 조치", "수시평가"],
+                      rows, [11, 12, 12, 30, 8, 16, 30, 8, 8, 8, 16, 10, 12]),
+                     ("정기 평가 대상 작업", ["부서", "시설", "작업", "작업 주기", f"{s['today'][:4]}년 평가 상태", "마지막 평가일"], tasks, [12, 12, 30, 10, 18, 12])],
+                    note=f"현장 위험성평가 AI {VERSION} · 작성일 {s['today']}")
+    log("위험성평가 대장 엑셀")
+    return file_response(data, f"위험성평가대장_{s['today']}.xlsx", XLSX)
 
 
 def tbm_script(a, k):

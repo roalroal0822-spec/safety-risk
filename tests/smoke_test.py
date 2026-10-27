@@ -84,6 +84,23 @@ def checks(c):
     ph = c.call("GET", "/api/sample-photo")
     p = c.call("POST", "/api/assess", {"fac": "종합체육센터", "work": "조명 교체", "text": "사다리 작업", "photos": [{"name": ph["name"], "b64": ph["b64"]}]})
     yield "사진 첨부(모델 없이 첨부만)", len(p["photos"]) == 1 and c.call("GET", f"/api/photo/{p['photos'][0]}", raw=True)[:4] == b"\x89PNG"
+    s0 = c.call("GET", "/api/state")
+    pt = s0["periodic"]
+    lamp = next(t for t in pt["tasks"] if "조명" in t["work"] and t["fac"] == "종합체육센터")
+    yield f"정기 평가 대상 작업 현황({pt['year']}년, 규정 {pt['basis']['basis']['label'] if pt['basis']['basis'] else '-'})", len(pt["tasks"]) == 9 and lamp["aid"] and pt["basis"]["basis"]
+    st = c.call("POST", "/api/assess", {"fac": "문화예술회관", "work": "공연 무대 장치·조명 설치", "text": "무대 위 높이 7m 트러스에 조명기 12대를 매다는 작업. 3명이 작업, 관람객 없음"})
+    yield "높이 작업인데 떨어짐을 못 찾으면 질문", not any(i["code"] == "H01" for i in st["items"]) and any("7m" in x for x in st["questions"]) and not st["conditions"].get("open")
+    yield "설명에 없는 낱말은 보태지 않음", c.status("POST", f"/api/assess/{st['id']}/add", {"code": "H01", "word": "비계다리"}) == 400
+    st2 = c.call("POST", f"/api/assess/{st['id']}/add", {"code": "H01", "word": "트러스"})
+    h = next(i for i in st2["items"] if i["code"] == "H01")
+    yield "위험요인 추가 + 낱말 보태기(높이 7m → 중대성 3)", h["quote"] and h["S"] == 3
+    nx = c.call("POST", "/api/assess", {"fac": "문화예술회관", "work": "무대 조명 철거", "text": "트러스에 달린 조명기 내리기"})
+    yield "다음 평가부터 보탠 낱말로 자동으로 찾음", any(i["code"] == "H01" and i["by"] == "낱말" and i["word"] == "트러스" for i in nx["items"])
+    d = c.call("POST", f"/api/assess/{st['id']}/xlsx", {}, raw=True)
+    d2 = c.call("POST", "/api/ledger-xlsx", {}, raw=True)
+    yield "엑셀(평가표·평가 대장)", d[:2] == b"PK" and d2[:2] == b"PK"
+    s1 = c.call("POST", "/api/learned/remove", {"code": "H01", "word": "트러스"})
+    yield "보탠 낱말 빼기", not s1["learned"] and "트러스" not in next(x for x in s1["hazards"] if x["code"] == "H01")["words"]
     yield "사진 경로 제한", c.status("GET", "/api/photo/..%2F..%2Fconfig.json") == 404
     yield "사진 형식 제한", c.status("POST", "/api/assess", {"work": "x", "photos": [{"name": "a.exe", "b64": "AA=="}]}) == 400
     yield "다른 사이트 요청 차단", c.status("POST", "/api/assess", {"work": "x"}, {"Origin": "http://evil.example"}) == 403

@@ -28,6 +28,20 @@ function renderDash() {
     box.append(el("div", { class: "panel" }, el("p", {}, "아직 평가가 없습니다. '새 위험성평가'에서 작업을 적어 보세요."),
       el("button", { class: "primary", onclick: () => GO("new") }, "새 위험성평가")));
   }
+  const P = S.periodic, ST = { ok: "ok", warn: "warn", bad: "bad" };
+  if (P.tasks.length) {
+    const done = P.tasks.filter(t => t.level === "ok").length;
+    box.append(el("div", { class: "panel", id: "periodic" },
+      el("div", { class: "row" }, el("h3", { style: { flex: 1, margin: 0 } }, `${P.year}년 정기 평가 대상 작업 ${done}/${P.tasks.length} 완료`),
+        P.basis.basis ? basisChip(P.basis.basis) : null,
+        el("button", { class: "small", onclick: () => download("/api/ledger-xlsx", {}) }, "평가 대장(엑셀)")),
+      el("div", { class: "pbar", style: { marginTop: "10px" } }, el("i", { style: { width: (done / P.tasks.length * 100) + "%" } })),
+      el("table", { class: "t", style: { marginTop: "10px" } }, el("tr", {}, ["시설", "작업", "작업 주기", "상태", "마지막 평가", ""].map(h => el("th", {}, h))),
+        P.tasks.map((t, i) => el("tr", {}, el("td", {}, t.fac), el("td", {}, t.work), el("td", {}, t.cycle),
+          el("td", {}, el("span", { class: "tag " + ST[t.level] }, t.state)), el("td", {}, t.date || "-"),
+          el("td", {}, t.aid && t.level !== "bad" ? el("button", { class: "small", onclick: () => openA(t.aid) }, "열기")
+            : el("button", { class: "small primary", onclick: () => startTask(i) }, "평가하기")))))));
+  }
   if (d.reassess.length) box.append(el("div", { class: "panel" }, el("h3", {}, "수시평가 필요(같은 작업에서 아차사고 발생)"),
     d.reassess.map(r => el("div", { class: "finding" }, el("i", { class: "dot warn" }), el("div", {}, el("div", { class: "ttl" }, `${r.fac} · ${r.work}`),
       el("button", { class: "small", onclick: () => openA(r.id) }, "평가 열기"))))));
@@ -42,6 +56,13 @@ function renderDash() {
 function fillTasks() {
   const sel = $("#task-pick");
   sel.replaceChildren(el("option", { value: "" }, "직접 입력"), ...S.tasks.map((t, i) => el("option", { value: i }, `${t.fac} · ${t.work} (${t.cycle})`)));
+}
+
+function startTask(i) {
+  $("#task-pick").value = i;
+  $("#task-pick").dispatchEvent(new Event("change"));
+  $("#n-text").value = "";
+  GO("new");
 }
 
 async function runNew() {
@@ -92,9 +113,9 @@ function renderDetail() {
       el("span", { class: "small muted" }, `${a.created} · ${a.engine} · ${a.status}`)),
     el("p", { class: "small" }, a.text),
     condChips.length ? el("div", { class: "small muted" }, "읽은 조건: ", condChips.map(x => el("span", { class: "chip" }, x))) : null,
-    el("div", { class: "verdict " + (st.ready ? "ok" : "bad"), style: { marginTop: "12px" } },
-      el("div", {}, el("div", { class: "big" }, st.ready ? "작업 시작 가능" : "작업 전 조치 필요"),
-        el("div", { class: "desc" }, st.ready ? "작업 전에 끝내야 할 감소대책을 모두 마쳤습니다. 작업 중 관리 항목은 계속 지켜 주세요."
+    el("div", { class: "verdict " + (st.empty ? "warn" : st.ready ? "ok" : "bad"), style: { marginTop: "12px" } },
+      el("div", {}, el("div", { class: "big" }, st.empty ? "평가가 끝나지 않음" : st.ready ? "작업 시작 가능" : "작업 전 조치 필요"),
+        el("div", { class: "desc" }, st.empty ? "평가표에 들어간 위험요인이 없습니다. 아래 '빠진 위험요인 추가'로 위험요인을 넣어 주세요." : st.ready ? "작업 전에 끝내야 할 감소대책을 모두 마쳤습니다. 작업 중 관리 항목은 계속 지켜 주세요."
           : `위험성 ${a.rules.high} 이상인 ${st.blocked.join(", ")}의 감소대책을 마치기 전에는 작업을 시작하지 않습니다(규정 기준).`))),
     a.questions.map(q => el("div", { class: "q" }, "확인 필요: " + q)),
     a.permits.length ? el("div", { class: "q", style: { background: "var(--bad-soft)", color: "var(--bad)" } }, "작업 전 허가: ",
@@ -105,6 +126,7 @@ function renderDetail() {
     a.photos.length ? el("div", { class: "photos", style: { marginTop: "10px" } }, a.photos.map(p => el("img", { src: `/api/photo/${p}`, alt: "현장 사진" }))) : null,
     el("div", { class: "row", style: { marginTop: "14px" } },
       el("span", { class: "small muted" }, "위험성평가표:"), exportButtons(`/api/assess/${a.id}/export`),
+      el("button", { onclick: () => download(`/api/assess/${a.id}/xlsx`, {}) }, "엑셀"),
       el("button", { onclick: showTBM }, "작업 전 회의(TBM)"),
       el("button", { class: a.status === "확정" ? "" : "primary", onclick: () => save({ status: a.status === "확정" ? "작성 중" : "확정" }) }, a.status === "확정" ? "확정 풀기" : "평가 확정"),
       el("button", { class: "danger small", onclick: async () => { await api("DELETE", `/api/assess/${a.id}`); CUR = null; box.innerHTML = ""; await load(); } }, "삭제"))));
@@ -132,9 +154,17 @@ function renderDetail() {
         el("button", { class: "small", onclick: async () => { CUR = await api("POST", `/api/assess/${a.id}/remove`, { code: it.code }); renderDetail(); } }, "빼기"))));
   }
   const have = new Set(a.items.map(i => i.code));
-  const add = el("select", {}, el("option", { value: "" }, "위험요인 추가…"), S.hazards.filter(h => !have.has(h.code)).map(h => el("option", { value: h.code }, `${h.code} ${h.name}`)));
-  add.addEventListener("change", async () => { if (add.value) { CUR = await api("POST", `/api/assess/${a.id}/add`, { code: add.value }); renderDetail(); } });
-  box.append(el("div", { class: "panel" }, el("div", { class: "row" }, el("span", { class: "small muted" }, "빠진 위험이 있으면:"), add)));
+  const add = el("select", { id: "add-code" }, el("option", { value: "" }, "위험요인 고르기…"), S.hazards.filter(h => !have.has(h.code)).map(h => el("option", { value: h.code }, `${h.code} ${h.name}`)));
+  const word = el("input", { id: "add-word", type: "text", placeholder: "작업 설명 속 어떤 말 때문인가요? (예: 트러스)", style: { flex: 1, minWidth: "260px" } });
+  box.append(el("div", { class: "panel" }, el("h3", {}, "빠진 위험요인 추가"),
+    el("p", { class: "small muted" }, "목록의 낱말로 못 찾은 위험을 넣습니다. 이 작업 설명에 있는 말을 함께 적으면 그 말을 위험요인의 '찾는 낱말'에 보태, 다음 평가부터 자동으로 찾습니다(원본 엑셀은 그대로, 보탠 낱말은 '기준·자료'에서 뺄 수 있음)."),
+    el("div", { class: "row" }, add, word,
+      el("button", { class: "primary", id: "add-btn", onclick: async () => {
+        if (!add.value) { toast("위험요인을 고르세요", true); return; }
+        CUR = await api("POST", `/api/assess/${a.id}/add`, { code: add.value, word: word.value });
+        if (word.value) toast(`'${word.value}'를 찾는 낱말에 보탰습니다`);
+        S = await api("GET", "/api/state"); renderDetail(); renderLib(); renderDash(); renderList();
+      } }, "추가"))));
 }
 
 async function showTBM() {
@@ -206,9 +236,15 @@ function renderLib() {
     el("button", { style: { marginTop: "10px" }, onclick: async () => { await api("POST", "/api/kb/sample"); await load(); toast("모의자료로 되돌렸습니다"); } }, "모의자료로 되돌리기")));
   box.append(el("div", { class: "panel" }, el("h3", {}, `위험요인 목록 ${S.hazards.length}종`),
     el("table", { class: "t" }, el("tr", {}, ["코드", "위험요인", "찾는 낱말", "가능성", "중대성", "감소대책", "관련 기준"].map(h => el("th", {}, h))),
-      S.hazards.map(h => el("tr", {}, el("td", {}, h.code), el("td", {}, h.name), el("td", { class: "small" }, h.words.join(", ")), el("td", {}, h.L), el("td", {}, h.S),
+      S.hazards.map(h => el("tr", {}, el("td", {}, h.code), el("td", {}, h.name),
+        el("td", { class: "small" }, h.words.filter(w => !h.learned.includes(w)).join(", "),
+          h.learned.map(w => el("span", { class: "chip learned", title: "현장에서 보탠 낱말(누르면 빼기)", onclick: async () => {
+            S = await api("POST", "/api/learned/remove", { code: h.code, word: w }); await load(); toast(`'${w}'를 뺐습니다`);
+          } }, "+ " + w))), el("td", {}, h.L), el("td", {}, h.S),
         el("td", { class: "small" }, h.measures.join(" / ")), el("td", { class: "small" }, h.law)))),
-    el("p", { class: "small muted" }, "관련 기준의 세부 조문은 국가법령정보센터에서 확인하세요. 목록은 엑셀로 고쳐 다시 올리면 됩니다.")));
+    el("p", { class: "small muted" }, "관련 기준의 세부 조문은 국가법령정보센터에서 확인하세요. 목록은 엑셀로 고쳐 다시 올리면 됩니다. 파란 칩은 현장에서 평가하며 보탠 낱말입니다."),
+    S.learned.length ? el("table", { class: "t" }, el("tr", {}, ["보탠 날", "위험요인", "낱말", "어느 작업에서"].map(h => el("th", {}, h))),
+      S.learned.map(x => el("tr", {}, el("td", {}, x.at), el("td", {}, x.code), el("td", {}, x.word), el("td", {}, x.work)))) : null));
 }
 
 async function renderLog() {

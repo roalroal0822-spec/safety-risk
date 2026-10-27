@@ -16,6 +16,7 @@ from kb import PERMIT, REG_TOPIC
 
 RX_HEIGHT = re.compile(r"(\d+(?:\.\d+)?)\s*(?:m|미터|M)(?![a-zA-Z²㎡])")
 RX_TEMP = re.compile(r"(?:체감온도|기온|온도)\s*(\d{2}(?:\.\d)?)\s*(?:℃|도)|(\d{2}(?:\.\d)?)\s*℃")
+RX_NOBODY = re.compile(r"(?:이용객|회원|관람객|수강생)\s*(?:이|은|는)?\s*없")  # '관람객 없음'은 운영 중이 아님
 RX_ALONE = re.compile(r"혼자|단독|(?<!\d)1인\s*작업|(?<!\d)1명|한\s*명(?:이|만|이서)|나\s*혼자")
 
 
@@ -31,11 +32,11 @@ def conditions(text, temp=None):
         c["temp"] = float(m.group(1) or m.group(2))
     if RX_ALONE.search(text or ""):
         c["alone"] = True
-    m = re.search(r"(\d+)\s*(?:인\s*1조|명이서|명\s*작업|인\s*작업)", text or "")
+    m = re.search(r"(\d+)\s*(?:인\s*1조|명이서|명이|명\s*작업|인\s*작업)", text or "")
     if m and int(m.group(1)) >= 2:
         c["people"] = int(m.group(1))
         c.pop("alone", None)
-    if re.search(r"운영\s*중|이용객|회원|관람객|수강생", text or ""):
+    if re.search(r"운영\s*중|이용객|회원|관람객|수강생", text or "") and not RX_NOBODY.search(text or ""):
         c["open"] = True
     if re.search(r"실외|옥외|옥상|주차장 진출입|야외|땡볕", text or ""):
         c["outdoor"] = True
@@ -191,6 +192,8 @@ def make(kb, fac, dept, work, text, temp=None, llm=None, photos=None, photo_name
         q, w = _quote(full, h["words"])
         if code == "H07" and not w and cond.get("outdoor") and cond.get("temp", 0) >= kb.values["heat_rest"]:
             q, w = f"실외 작업, 체감온도 {cond['temp']:g}℃", "체감온도"
+        if code == "H12" and w and RX_NOBODY.search(full):
+            continue
         if w:
             items.append(_item(kb, code, "낱말", q, w))
             have.add(code)
@@ -232,6 +235,9 @@ def make(kb, fac, dept, work, text, temp=None, llm=None, photos=None, photo_name
     questions = []
     if "H01" in on and "height" not in cond:
         questions.append("작업 높이가 몇 m인가요? (2m 이상이면 작업발판·안전대가 필요합니다)")
+    if cond.get("height", 0) >= kb.values["height"] and "H01" not in on and "H01" in kb.hazards:
+        questions.append(f"높이 {cond['height']:g}m 작업인데 목록의 낱말로 '{kb.hazards['H01']['name']}'을 찾지 못했습니다. "
+                         "아래 '위험요인 추가'로 넣고 이 작업을 가리키는 말을 적어 두면 다음부터 자동으로 찾습니다.")
     if cond.get("outdoor") and "temp" not in cond:
         questions.append("실외 작업입니다. 작업 시간대의 체감온도를 넣으면 폭염 기준으로 다시 판단합니다.")
     if not items:
@@ -252,10 +258,11 @@ def rescore(kb, a):
     return a
 
 
-def add_item(kb, a, code):
+def add_item(kb, a, code, word=""):
     if code not in kb.hazards or any(i["code"] == code for i in a["items"]):
         return a
-    it = _item(kb, code, "직접 추가")
+    q, w = _quote(". ".join(x for x in (a["work"], a["text"]) if x), [word]) if word else ("", "")
+    it = _item(kb, code, "직접 추가", q, w)
     rate(kb, it, a["conditions"], a["fac"], a["work"], {i["code"] for i in a["items"]} | {code})
     a["items"].append(it)
     return rescore(kb, a)
@@ -269,7 +276,7 @@ def stats(a):
     overdue = [(i, m) for i, m in open_ if m["due"] and m["due"] < today]
     blocked = [i for i in high if not i["all_done"]]
     return {"items": len(items), "high": len(high), "open": len(open_), "overdue": len(overdue),
-            "ready": not blocked, "blocked": [i["name"] for i in blocked],
+            "ready": bool(items) and not blocked, "empty": not items, "blocked": [i["name"] for i in blocked],
             "unconfirmed": sum(1 for i in a["items"] if not i["confirmed"])}
 
 
@@ -285,3 +292,22 @@ def reassess_hits(kb, assessments, inc):
                 a["reassess"].append({"incident": inc["id"], "date": inc["date"], "text": inc["text"][:80], "src": inc.get("src"), "basis": basis})
                 hits.append(a["id"])
     return hits
+
+
+def task_status(kb, task, assessments, year):
+    """정기 평가 대상 작업 하나의 올해 평가 상태. 같은 시설이고 작업 이름이 겹치는 평가 중 가장 최근 것을 본다."""
+    mine = [a for a in assessments if _overlap(task["work"], a["work"])
+            and not (task["fac"] and a["fac"] and not (task["fac"] in a["fac"] or a["fac"] in task["fac"]))]
+    last = max(mine, key=lambda a: a["created"], default=None)
+    if not last:
+        return {"state": "평가 없음", "level": "bad", "aid": None, "date": ""}
+    st = stats(last)
+    if last["reassess"]:
+        state, lv = "수시평가 필요", "warn"
+    elif last["created"][:4] != year:
+        state, lv = "올해 평가 안 함", "bad"
+    elif not st["ready"]:
+        state, lv = "작업 전 조치 남음", "warn"
+    else:
+        state, lv = "올해 평가함", "ok"
+    return {"state": state, "level": lv, "aid": last["id"], "date": last["created"], "count": len(mine)}
