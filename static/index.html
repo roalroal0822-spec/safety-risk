@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>현장 위험성평가 AI - 작업 전 위험성평가</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/core/common.css">
+<style>
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  @media (max-width: 900px) { .kpis { grid-template-columns: 1fr 1fr; } }
+  .stat .lbl { font-size: 13px; color: var(--muted); }
+  .stat.bad b { color: var(--bad); } .stat.warn b { color: var(--warn); }
+  .hz { border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 12px; background: var(--panel); }
+  .hz.bad { border-left: 6px solid #ff3b30; } .hz.warn { border-left: 6px solid #ff9f0a; } .hz.ok { border-left: 6px solid #30d158; }
+  .hz.unconf { border-style: dashed; opacity: .85; }
+  .hz h3 { margin: 0; font-size: 17px; }
+  .risk { display: inline-grid; place-items: center; min-width: 46px; height: 46px; border-radius: 12px; font-size: 22px; font-weight: 700; color: #fff; }
+  .risk.bad { background: #ff3b30; } .risk.warn { background: #ff9f0a; } .risk.ok { background: #30d158; }
+  .ls select { padding: 4px 26px 4px 8px; font-size: 13px; }
+  .meas { display: grid; grid-template-columns: 24px 1fr 110px 140px; gap: 8px; align-items: center; font-size: 14px; padding: 4px 0; border-top: 1px solid var(--line); }
+  .meas:first-child { border-top: 0; }
+  .meas input[type=text], .meas input[type=date] { padding: 4px 8px; font-size: 13px; }
+  .meas.done span { color: var(--muted); text-decoration: line-through; }
+  .reason { font-size: 13px; color: var(--muted); }
+  .photos img { max-height: 160px; border-radius: 10px; border: 1px solid var(--line); margin-right: 8px; }
+  .tbm { font-size: 17px; line-height: 1.9; }
+  .tbm li { margin-bottom: 6px; }
+  .q { background: var(--warn-soft); color: var(--warn); padding: 10px 14px; border-radius: 10px; margin-top: 8px; font-size: 14px; }
+  .matrix td { text-align: center; width: 60px; height: 34px; font-weight: 600; color: #fff; }
+</style>
+</head>
+<body>
+<div class="gov-strip"><b>2026 공공 AI 대전환 챌린지 출품작</b><span class="sep">|</span><span>시연용 모의자료 사용</span></div>
+<div class="masthead"><span class="ms-mark" aria-hidden="true">AI</span><b>공공기관 업무지원 AI 서비스</b><span class="ms-sub">현장 위험성평가 AI</span></div>
+<header class="top">
+  <span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 3 20h18z"/><path d="M12 10v4M12 17h.01"/></svg></span>
+  <div>
+    <div class="eyebrow">중대재해 예방 · 현장 안전</div>
+    <h1>현장 위험성평가 AI</h1>
+    <div class="sub">작업을 말하면, 위험성평가표와 오늘의 안전 회의가 나옵니다.</div>
+    <ul class="highlights"><li><b>3분 위험성평가</b><span>위험요인·가능성·중대성·감소대책을 근거와 함께</span></li><li><b>아차사고가 평가를 바꿉니다</b><span>같은 작업의 사고가 가능성을 올리고 수시평가를 알립니다</span></li><li><b>작업 전 회의(TBM)</b><span>낭독용 문안과 서명 기록지를 바로</span></li></ul>
+  </div>
+  <div class="spacer"></div>
+  <span id="llm-badge" class="llm-badge">모델: …</span>
+</header>
+<nav class="tabs">
+  <button data-tab="dash">현황</button>
+  <button data-tab="new">새 위험성평가</button>
+  <button data-tab="list">평가 목록</button>
+  <button data-tab="inc">아차사고</button>
+  <button data-tab="lib">기준·자료</button>
+  <button data-tab="log">작업 기록</button>
+</nav>
+<main>
+  <section class="tab" id="tab-dash"></section>
+  <section class="tab" id="tab-new" hidden>
+    <div class="panel">
+      <h2>어떤 작업을 하나요?</h2>
+      <p class="small muted">평소 말하듯 적으면 됩니다. 높이, 인원, 장비, 약품, 장소, 운영 중인지 같은 조건을 적을수록 정확해집니다.</p>
+      <div class="row" style="margin-bottom:8px"><span class="small muted">정기 평가 대상 작업에서 고르기:</span><select id="task-pick"><option value="">직접 입력</option></select></div>
+      <div class="grid3">
+        <div><label class="f">시설</label><input id="n-fac" class="wide" placeholder="예: 종합체육센터"></div>
+        <div><label class="f">부서</label><input id="n-dept" class="wide" placeholder="예: 체육사업팀"></div>
+        <div><label class="f">체감온도(℃, 실외 작업이면)</label><input id="n-temp" class="wide" placeholder="예: 34"></div>
+      </div>
+      <label class="f">작업</label><input id="n-work" class="wide" placeholder="예: 체육관 천장 조명(등기구) 교체">
+      <label class="f">작업 설명</label>
+      <textarea id="n-text" class="wide" rows="3" placeholder='예: "이동식 일자 사다리로 높이 4m 등기구 안정기 교체. 혼자 작업, 바닥 왁스 청소 직후"'></textarea>
+      <label class="f">현장 사진(선택, 최대 4장)</label>
+      <div class="row"><input type="file" id="n-photo" accept=".png,.jpg,.jpeg" multiple><button class="small" id="n-sample-photo">시연용 사진 넣기</button><span id="n-photo-list" class="small muted"></span></div>
+      <div class="row" style="margin-top:14px"><button class="primary" id="n-run">위험성평가 만들기</button><button id="n-example">예시 채우기</button></div>
+    </div>
+  </section>
+  <section class="tab" id="tab-list" hidden><div id="list-box"></div><div id="detail"></div></section>
+  <section class="tab" id="tab-inc" hidden></section>
+  <section class="tab" id="tab-lib" hidden></section>
+  <section class="tab" id="tab-log" hidden></section>
+</main>
+<script src="/core/common.js"></script>
+<script src="/app.js"></script>
+<footer class="foot">공공기관 업무지원 AI 서비스 · 화면에 나오는 기관·시설·인물·사건은 모두 시연용 모의자료입니다. 평가 결과는 현장 확인을 거쳐 확정하세요.</footer>
+</body>
+</html>
