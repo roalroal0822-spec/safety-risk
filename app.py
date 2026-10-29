@@ -12,6 +12,7 @@ from core.export import export
 from core.llm import LLM
 from core.server import App, HttpError, Response, file_response
 from core.sources import safe_parts
+from core.pii import mask
 from core.store import Store
 from core.xlsx import CTYPE as XLSX, workbook
 
@@ -30,6 +31,29 @@ KB_ROOT = store.path("kb")
 PHOTOS = store.path("photos")
 app = App(HERE / "static")
 webcommon.register(app, cfg, llm, "현장 위험성평가 AI", VERSION)
+ABOUT = {
+    "lead": "위험요인 찾기·가능성·중대성·작업 시작 판정은 규칙과 기관 규정으로 하고, 모델은 낱말로 못 찾은 위험을 '제안'만 합니다. 모델이 없어도 같은 결과가 나옵니다.",
+    "pipeline": [("작업 설명 읽기", "높이·인원·체감온도·운영 중·실외 여부를 읽고, 개인정보는 먼저 가림"),
+                 ("위험요인 찾기", "기관 위험요인 목록의 '찾는 낱말'로 찾고 근거 문구를 붙임"),
+                 ("가능성·중대성", "조건과 최근 같은 작업의 아차사고로 조정, 조정마다 이유와 원본 행"),
+                 ("규정 기준 판정", "위험성 6 이상은 작업 전 감소대책 완료(규정 조문에서 읽은 값)"),
+                 ("모델 제안(선택)", "목록에 있는 코드이고 근거 문구가 설명에 그대로 있어야 받음, 사진은 '현장 확인 필요'"),
+                 ("평가표·TBM", "평가표·TBM 문안·서명지, 아차사고가 나면 수시평가 표시")],
+    "guards": ["가능성·중대성 조정과 작업 시작 판정은 모델이 하지 않고 규칙으로만 합니다.",
+               "모델이 제안한 위험요인은 기관 목록에 있는 코드여야 하고, 근거 문구가 작업 설명에 그대로 있어야 받습니다.",
+               "사진에서 모델이 본 위험은 '현장 확인 필요'로 두고, 담당자가 확인해야 평가표에 들어갑니다.",
+               "판단 기준값(6 이상·3 이상, 폭염 33℃·35℃, 높이 2m)은 기관 규정 조문에서 읽고, 없으면 '기본값'으로 표시합니다.",
+               "위험요인을 하나도 찾지 못하면 '작업 시작 가능'이 아니라 '평가가 끝나지 않음'으로 막습니다.",
+               "높이 2m 이상 작업인데 떨어짐을 찾지 못하면 지어내지 않고 먼저 묻습니다.",
+               "현장에서 보탠 낱말은 작업 설명에 실제로 있던 말만 받고, 따로 표시하며 뺄 수 있습니다.",
+               "관련 기준은 법령 이름과 주제까지만 적고, 조문 번호를 지어내지 않습니다.",
+               "작업 설명·아차사고에 적은 개인정보(전화·주민번호·계좌 등)는 저장·모델 전달 전에 ○○○로 가립니다."],
+    "data": ["시연 자료(위험요인 목록·규정·작업·아차사고)는 모두 지어낸 모의자료입니다. 기관 자료로 바꾸면 그대로 동작합니다.",
+             "관련 기준의 세부 조문은 국가법령정보센터에서 확인하도록 했습니다.",
+             "시연용 사진은 그림이며, 실제 비전 모델의 정확도는 기관 PC에서 실측해야 합니다.",
+             "자료는 이 PC의 작업 폴더(data)에만 저장되고, 화면은 이 PC에서만 열립니다."],
+}
+webcommon.register_about(app, HERE, ABOUT)
 
 STATE = {"kb": None}
 
@@ -132,8 +156,8 @@ def state(req):
 @app.post("/api/assess")
 def create(req):
     b = req.json or {}
-    work = (b.get("work") or "").strip()
-    text = (b.get("text") or "").strip()
+    work, k1 = mask((b.get("work") or "").strip())
+    text, k2 = mask((b.get("text") or "").strip())
     if not work and not text:
         raise HttpError(400, "작업 이름이나 작업 설명을 입력하세요")
     photos, names = [], []
@@ -157,6 +181,8 @@ def create(req):
             raise HttpError(400, "체감온도는 숫자로 입력하세요")
     a = assess.make(kb(), (b.get("fac") or "").strip(), (b.get("dept") or "").strip(), work, text, temp,
                     llm if llm.enabled else None, photos, names)
+    if k1 or k2:
+        a["notes"].insert(0, f"작업 설명의 개인정보({', '.join(dict.fromkeys(k1 + k2))})를 ○○○로 가린 뒤 평가했습니다.")
     log("위험성평가 작성", f"{a['fac']} {a['work']}")
     return put_a(a)
 
@@ -389,7 +415,7 @@ def tbm_doc(req):
 @app.post("/api/incidents")
 def add_incident(req):
     b = req.json or {}
-    text = (b.get("text") or "").strip()
+    text, hidden = mask((b.get("text") or "").strip())
     d = (b.get("date") or date.today().isoformat()).strip()
     if not text:
         raise HttpError(400, "무슨 일이 있었는지 적어 주세요")
@@ -399,7 +425,7 @@ def add_incident(req):
         raise HttpError(400, "날짜는 2026-10-27 형식으로 입력하세요")
     items = user_incidents()
     inc = {"id": "U" + uuid.uuid4().hex[:6], "date": d, "fac": (b.get("fac") or "").strip(), "work": (b.get("work") or "").strip(),
-           "text": text, "result": (b.get("result") or "").strip(), "origin": "user", "src": None}
+           "text": text, "result": mask((b.get("result") or "").strip())[0], "origin": "user", "src": None}
     items.append(inc)
     store.write("incidents.json", {"items": items})
     k = reload()
@@ -409,7 +435,7 @@ def add_incident(req):
     save_all(alls)
     log("아차사고 등록", f"{inc['fac']} {text[:30]}" + (f" → 수시평가 필요 {len(hits)}건" if hits else ""))
     return {"incident": inc, "hits": [{"id": a["id"], "work": a["work"], "fac": a["fac"]} for a in alls if a["id"] in hits],
-            "codes": [{"code": c, "name": k.hazards[c]["name"]} for c in inc["codes"]], "basis": k.cite_topic(r"수시평가")}
+            "codes": [{"code": c, "name": k.hazards[c]["name"]} for c in inc["codes"]], "basis": k.cite_topic(r"수시평가"), "masked": hidden}
 
 
 # ------------------------------------------------------------ 기관 자료

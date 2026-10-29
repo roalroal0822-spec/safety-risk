@@ -180,6 +180,7 @@ function incResult(r) {
   return el("div", { class: "verdict " + (r.hits.length ? "warn" : "ok"), style: { marginTop: "14px" } }, el("div", {},
     el("div", { class: "big" }, r.hits.length ? `수시평가 필요 ${r.hits.length}건` : "등록했습니다"),
     el("div", { class: "desc" }, "분류한 위험요인: " + (r.codes.map(c => c.name).join(", ") || "없음"),
+      r.masked && r.masked.length ? el("div", {}, `개인정보(${r.masked.join(", ")})를 ○○○로 가려 저장했습니다.`) : null,
       r.hits.length ? el("div", {}, "다시 평가할 작업: ", r.hits.map(h => el("span", { class: "chip", onclick: () => openA(h.id) }, `${h.fac} · ${h.work}`)), " ", basisChip(r.basis)) : null)));
 }
 
@@ -255,7 +256,7 @@ async function renderLog() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  GO = setupTabs(id => { if (id === "log") renderLog(); });
+  GO = setupTabs(id => { if (id === "log") renderLog(); if (id === "about") renderAbout(); });
   $("#n-run").addEventListener("click", runNew);
   $("#n-example").addEventListener("click", () => {
     $("#n-fac").value = "종합체육센터"; $("#n-dept").value = "체육사업팀"; $("#n-temp").value = "";

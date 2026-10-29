@@ -103,6 +103,10 @@ def checks(c):
     yield "보탠 낱말 빼기", not s1["learned"] and "트러스" not in next(x for x in s1["hazards"] if x["code"] == "H01")["words"]
     yield "사진 경로 제한", c.status("GET", "/api/photo/..%2F..%2Fconfig.json") == 404
     yield "사진 형식 제한", c.status("POST", "/api/assess", {"work": "x", "photos": [{"name": "a.exe", "b64": "AA=="}]}) == 400
+    ab = c.call("GET", "/api/about")
+    yield "서비스 구조·검증(처리 단계·안전장치·성적표)", len(ab["pipeline"]) >= 5 and len(ab["guards"]) >= 5 and ab["scorecard"] and ab["scorecard"]["areas"]
+    pi = c.call("POST", "/api/incidents", {"fac": "본부 청사", "work": "분전반 점검", "text": "담당 홍길동 010-1234-5678, 차단기 감전 위험", "result": "다침 없음"})
+    yield "아차사고의 개인정보 가림", pi["masked"] == ["휴대전화"] and "010-1234" not in pi["incident"]["text"]
     yield "다른 사이트 요청 차단", c.status("POST", "/api/assess", {"work": "x"}, {"Origin": "http://evil.example"}) == 403
     yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 5
 
