@@ -1,6 +1,8 @@
 @echo off
 chcp 65001 > nul
 cd /d "%~dp0"
+rem 공공데이터 키(선택): keys.example.bat 을 keys.bat 으로 바꿔 키를 넣으면 실제 날씨·재난문자를 씁니다
+if exist keys.bat call keys.bat
 rem Windows 바로 실행판: 함께 든 runtime\ 폴더(파이썬과 라이브러리 포함)가 있으면 설치 없이 바로 실행
 if exist runtime\python.exe (
   echo 바로 실행판으로 시작합니다. 잠시 뒤 브라우저가 열립니다.

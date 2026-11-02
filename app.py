@@ -17,6 +17,7 @@ from core.store import Store
 from core.xlsx import CTYPE as XLSX, workbook
 
 import assess
+import feeds
 from kb import KB
 
 VERSION = "1.1.0"
@@ -38,6 +39,7 @@ ABOUT = {
                  ("가능성·중대성", "조건과 최근 같은 작업의 아차사고로 조정, 조정마다 이유와 원본 행"),
                  ("규정 기준 판정", "위험성 6 이상은 작업 전 감소대책 완료(규정 조문에서 읽은 값)"),
                  ("모델 제안(선택)", "목록에 있는 코드이고 근거 문구가 설명에 그대로 있어야 받음, 사진은 '현장 확인 필요'"),
+                 ("날씨·재난문자", "기상청 체감온도·기상특보로 작업 시작 판정, 긴급재난문자와 겹치는 평가에 수시평가 표시"),
                  ("평가표·TBM", "평가표·TBM 문안·서명지, 아차사고가 나면 수시평가 표시")],
     "guards": ["가능성·중대성 조정과 작업 시작 판정은 모델이 하지 않고 규칙으로만 합니다.",
                "모델이 제안한 위험요인은 기관 목록에 있는 코드여야 하고, 근거 문구가 작업 설명에 그대로 있어야 받습니다.",
@@ -47,8 +49,10 @@ ABOUT = {
                "높이 2m 이상 작업인데 떨어짐을 찾지 못하면 지어내지 않고 먼저 묻습니다.",
                "현장에서 보탠 낱말은 작업 설명에 실제로 있던 말만 받고, 따로 표시하며 뺄 수 있습니다.",
                "관련 기준은 법령 이름과 주제까지만 적고, 조문 번호를 지어내지 않습니다.",
+               "기상특보에 따른 작업 중지는 특보 종류와 작업 조건(실외·높은 곳)으로 규칙만으로 판정하고, 체감온도는 기상청 공개 식으로 계산합니다.",
                "작업 설명·아차사고에 적은 개인정보(전화·주민번호·계좌 등)는 저장·모델 전달 전에 ○○○로 가립니다."],
     "data": ["시연 자료(위험요인 목록·규정·작업·아차사고)는 모두 지어낸 모의자료입니다. 기관 자료로 바꾸면 그대로 동작합니다.",
+             "날씨(기상청 단기예보·기상특보)와 긴급재난문자(행정안전부)는 키를 넣으면 실제 자료를, 키가 없거나 연결이 안 되면 예시 자료를 쓰고 화면에 출처를 표시합니다.",
              "관련 기준의 세부 조문은 국가법령정보센터에서 확인하도록 했습니다.",
              "시연용 사진은 그림이며, 실제 비전 모델의 정확도는 기관 PC에서 실측해야 합니다.",
              "자료는 이 PC의 작업 폴더(data)에만 저장되고, 화면은 이 PC에서만 열립니다."],
@@ -179,8 +183,13 @@ def create(req):
             temp = float(temp)
         except ValueError:
             raise HttpError(400, "체감온도는 숫자로 입력하세요")
+    wx = feeds.weather() if b.get("use_weather") else None
+    if wx and temp in (None, ""):
+        temp = wx["feel"]
     a = assess.make(kb(), (b.get("fac") or "").strip(), (b.get("dept") or "").strip(), work, text, temp,
                     llm if llm.enabled else None, photos, names)
+    if wx:
+        set_weather(a, wx)
     if k1 or k2:
         a["notes"].insert(0, f"작업 설명의 개인정보({', '.join(dict.fromkeys(k1 + k2))})를 ○○○로 가린 뒤 평가했습니다.")
     log("위험성평가 작성", f"{a['fac']} {a['work']}")
@@ -322,10 +331,16 @@ def export_sheet(req):
     reasons = [(it["name"], r) for it in items for r in it["reasons"]]
     if reasons:
         blocks += [("h2", "가능성·중대성 판단 이유")] + [("bullet", f"{n}: {r['text']}" + (f" [{r['src']['file']} {r['src']['loc']}]" if r.get("src") else "")) for n, r in reasons]
+    wx = a.get("weather")
+    if wx:
+        blocks += [("h2", "작업 당일 기상(공공데이터)"),
+                   ("bullet", f"{wx['region']} {wx['time']}: 기온 {wx['ta']:g}℃, 습도 {wx['rh']:g}%, 체감온도 {wx['feel']:g}℃ (출처: {wx['source']})"),
+                   ("bullet", "발표 중인 특보: " + (", ".join(w["kind"] + w["level"] for w in wx["warnings"]) or "없음"))] + [
+                   ("bullet", "작업 중지: " + t + " (관련 기준: 산업안전보건기준에 관한 규칙, 악천후·강풍 시 작업 중지)") for t in wx["stops"]]
     if a["permits"]:
         blocks += [("h2", "작업 전 필요한 허가")] + [("bullet", p["name"] + (f" (근거: {p['basis']['reg']} {p['basis']['label']})" if p.get("basis") else "")) for p in a["permits"]]
     if a["reassess"]:
-        blocks += [("h2", "수시평가 사유")] + [("bullet", f"{r['date']} 아차사고: {r['text']}") for r in a["reassess"]]
+        blocks += [("h2", "수시평가 사유")] + [("bullet", f"{r['date']} {r.get('kind', '아차사고')}: {r['text']}") for r in a["reassess"]]
     blocks += [("h2", "평가 참여자 확인"), ("table", ["구분", "성명", "서명"], [["작업 책임자", "", ""], ["작업자", "", ""], ["작업자", "", ""], ["안전 담당", "", ""]], [2, 3, 3]),
                ("note", f"※ 작성: 현장 위험성평가 AI({a['engine']}). 위험요인·가능성·중대성은 담당자가 현장에서 확인해 고친 값입니다. 기록은 규정에 따라 보존합니다.")]
     fmt = req.query.get("fmt", "hwpx")
@@ -378,6 +393,15 @@ def tbm_script(a, k):
         for n, i in enumerate(items, 1):
             todo = [m["text"] for m in i["measures"]][:2]
             lines.append(f"{n}번을 막으려면 " + " 그리고 ".join(todo) + ".")
+    wx = a.get("weather")
+    if wx:
+        lines.append(f"오늘 날씨: 체감온도 {wx['feel']:g}℃" + (", 발표 중인 특보: " + ", ".join(w["kind"] + w["level"] for w in wx["warnings"]) if wx["warnings"] else "")
+                     + ("" if wx["live"] else " (예시 자료)") + ".")
+        for t in wx["stops"]:
+            lines.append(t + ".")
+    msgs = [r for r in a["reassess"] if r.get("kind") == "재난문자" and r["date"] == date.today().isoformat()]
+    for r in msgs[:2]:
+        lines.append("오늘 받은 재난문자를 함께 확인합니다: " + r["text"].split(" → ")[0].split(": ", 1)[-1])
     if a["permits"]:
         lines.append("작업 전에 " + ", ".join(p["name"] for p in a["permits"]) + "를 받았는지 확인합니다.")
     blocked = assess.stats(a)["blocked"]
@@ -408,6 +432,63 @@ def tbm_doc(req):
     data, ctype = export(blocks, fmt)
     log("TBM 기록지 만들기", a["work"])
     return file_response(data, f"TBM기록_{a['work'][:20]}.{fmt}", ctype)
+
+
+# ------------------------------------------------------------ 공공데이터: 날씨·재난문자
+
+def set_weather(a, wx):
+    codes = {i["code"] for i in a["items"] if i["confirmed"]}
+    a["weather"] = {k: wx[k] for k in ("source", "live", "region", "time", "ta", "rh", "feel", "note")}
+    a["weather"]["warnings"] = feeds.active_warnings(wx)
+    a["weather"]["stops"] = feeds.weather_stops(wx, a["conditions"], codes)
+    a["weather"]["checked"] = date.today().isoformat()
+
+
+@app.get("/api/feeds/weather")
+def feed_weather(req):
+    wx = feeds.weather()
+    return dict(wx, active=feeds.active_warnings(wx), formula="기상청 여름철 체감온도 식(기온·습도)")
+
+
+@app.post("/api/assess/<aid>/weather")
+def recheck_weather(req):
+    a = get_a(req.params["aid"])
+    set_weather(a, feeds.weather())
+    log("기상특보 다시 확인", a["work"])
+    return put_a(a)
+
+
+def _msg_hits(m, items):
+    return [{"id": a["id"], "fac": a["fac"], "work": a["work"], "hazards": h,
+             "done": any(r.get("incident") == "MSG-" + m["sn"] for r in a["reassess"])}
+            for a in items for h in [feeds.message_hits(m, a)] if h]
+
+
+@app.get("/api/feeds/messages")
+def feed_messages(req):
+    r = feeds.messages()
+    items = assessments()
+    for m in r["items"]:
+        m["hits"] = _msg_hits(m, items)
+    return r
+
+
+@app.post("/api/feeds/messages/apply")
+def apply_messages(req):
+    r = feeds.messages()
+    items = assessments()
+    n = 0
+    for m in r["items"]:
+        for a in items:
+            h = feeds.message_hits(m, a)
+            if h and not any(x.get("incident") == "MSG-" + m["sn"] for x in a["reassess"]):
+                a["reassess"].append({"incident": "MSG-" + m["sn"], "kind": "재난문자", "date": date.today().isoformat(),
+                                      "text": f"긴급재난문자({m['kind'] or '안내'}): {m['text'][:80]} → 다시 볼 위험요인: {', '.join(h)}",
+                                      "src": None, "basis": None, "source": r["source"]})
+                n += 1
+    save_all(items)
+    log("긴급재난문자 반영", f"수시 확인 표시 {n}건 ({r['source']})")
+    return {"added": n, "source": r["source"]}
 
 
 # ------------------------------------------------------------ 아차사고

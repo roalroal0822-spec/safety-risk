@@ -275,8 +275,10 @@ def stats(a):
     today = date.today().isoformat()
     overdue = [(i, m) for i, m in open_ if m["due"] and m["due"] < today]
     blocked = [i for i in high if not i["all_done"]]
+    wstops = (a.get("weather") or {}).get("stops", [])
     return {"items": len(items), "high": len(high), "open": len(open_), "overdue": len(overdue),
-            "ready": bool(items) and not blocked, "empty": not items, "blocked": [i["name"] for i in blocked],
+            "ready": bool(items) and not blocked and not wstops, "empty": not items, "blocked": [i["name"] for i in blocked],
+            "weather_stops": wstops,
             "unconfirmed": sum(1 for i in a["items"] if not i["confirmed"])}
 
 

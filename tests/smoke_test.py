@@ -108,6 +108,20 @@ def checks(c):
     pi = c.call("POST", "/api/incidents", {"fac": "본부 청사", "work": "분전반 점검", "text": "담당 홍길동 010-1234-5678, 차단기 감전 위험", "result": "다침 없음"})
     yield "아차사고의 개인정보 가림", pi["masked"] == ["휴대전화"] and "010-1234" not in pi["incident"]["text"]
     yield "다른 사이트 요청 차단", c.status("POST", "/api/assess", {"work": "x"}, {"Origin": "http://evil.example"}) == 403
+    w = c.call("GET", "/api/feeds/weather")
+    yield f"기상청 날씨(키 없음 → 예시 자료, 체감온도 {w['feel']}℃·특보 {len(w['active'])}건)", not w["live"] and w["feel"] == 33.6 and len(w["active"]) == 2
+    rf = c.call("POST", "/api/assess", {"fac": "본부 청사", "work": "옥상 냉각탑 점검·청소", "text": "옥상 냉각탑 위 높이 3m 사다리 작업, 2명이 작업", "use_weather": True})
+    yield f"실외 높은 곳 + 강풍특보 → 작업 중지 {rf['stats']['weather_stops']}", rf["stats"]["weather_stops"] and not rf["stats"]["ready"] and rf["conditions"]["temp"] == 33.6
+    a4 = c.call("POST", f"/api/assess/{a['id']}/weather", {})
+    yield "실내 작업은 강풍특보로 막지 않음", not a4["stats"]["weather_stops"] and a4["stats"]["ready"]
+    m = c.call("GET", "/api/feeds/messages")
+    yield f"긴급재난문자(예시 {len(m['items'])}건, 겹치는 평가 {sum(len(x['hits']) for x in m['items'])}건)", not m["live"] and any(x["hits"] for x in m["items"])
+    ap = c.call("POST", "/api/feeds/messages/apply", {})
+    ap2 = c.call("POST", "/api/feeds/messages/apply", {})
+    rf2 = c.call("GET", f"/api/assess/{rf['id']}")
+    yield f"재난문자 → 수시평가 필요 {ap['added']}건(두 번 눌러도 한 번만)", ap["added"] > 0 and ap2["added"] == 0 and any(r.get("kind") == "재난문자" for r in rf2["reassess"])
+    t2 = c.call("GET", f"/api/assess/{rf['id']}/tbm")["lines"]
+    yield "TBM에 날씨·작업 중지·재난문자", any("체감온도" in x for x in t2) and any("특보가 풀린 뒤" in x for x in t2) and any("재난문자" in x for x in t2)
     yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 5
 
 
@@ -115,6 +129,8 @@ def main():
     tmp = tempfile.mkdtemp(prefix="smoke-safety-")
     port = free_port()
     env = dict(os.environ, APP_DATA_DIR=tmp, LLM_PROVIDER="none")
+    env.pop("DATA_GO_KR_KEY", None)
+    env.pop("SAFETYDATA_KEY", None)
     proc = subprocess.Popen([sys.executable, "run.py", "--no-browser", "--port", str(port)], cwd=ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     total = failed = 0

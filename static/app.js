@@ -1,5 +1,5 @@
 "use strict";
-let S = null, GO = null, CUR = null, PHOTOS = [], LASTINC = null;
+let S = null, GO = null, CUR = null, PHOTOS = [], LASTINC = null, USEWX = false, MSGS = null;
 const LV = { bad: "작업 전 조치 완료", warn: "작업 중 관리", ok: "현재 조치 유지" };
 
 async function load() {
@@ -24,6 +24,10 @@ function renderDash() {
       el("div", { class: "stat warn" }, el("b", {}, d.overdue.length), el("span", { class: "lbl" }, "기한 지난 조치")),
       el("div", { class: "stat warn" }, el("b", {}, d.reassess.length), el("span", { class: "lbl" }, "수시평가 필요"))),
     el("p", { class: "small muted", style: { marginTop: "10px" } }, `기관 자료: 위험요인 ${S.kb.hazards}종 · 평가 대상 작업 ${S.kb.tasks}개 · 아차사고 ${S.kb.incidents}건 · 규정 ${S.kb.reg || "없음"}`)));
+  box.append(el("div", { class: "panel", id: "msgs" }, el("div", { class: "row" }, el("h3", { style: { flex: 1, margin: 0 } }, "오늘의 긴급재난문자"),
+      el("button", { class: "small", id: "msgs-btn", onclick: e => renderMsgs(e.currentTarget) }, MSGS ? "다시 확인" : "재난문자 확인")),
+    el("p", { class: "small muted" }, "우리 지역에 온 재난문자(폭염·강풍·호우 등)와 겹치는 위험요인이 있는 평가를 찾아, 수시평가 필요로 표시하고 작업 전 회의(TBM)에 넣습니다."),
+    el("div", { id: "msgs-body" })));
   if (!d.assessments) {
     box.append(el("div", { class: "panel" }, el("p", {}, "아직 평가가 없습니다. '새 위험성평가'에서 작업을 적어 보세요."),
       el("button", { class: "primary", onclick: () => GO("new") }, "새 위험성평가")));
@@ -42,7 +46,7 @@ function renderDash() {
           el("td", {}, t.aid && t.level !== "bad" ? el("button", { class: "small", onclick: () => openA(t.aid) }, "열기")
             : el("button", { class: "small primary", onclick: () => startTask(i) }, "평가하기")))))));
   }
-  if (d.reassess.length) box.append(el("div", { class: "panel" }, el("h3", {}, "수시평가 필요(같은 작업에서 아차사고 발생)"),
+  if (d.reassess.length) box.append(el("div", { class: "panel" }, el("h3", {}, "수시평가 필요(같은 작업의 아차사고 또는 오늘 재난문자)"),
     d.reassess.map(r => el("div", { class: "finding" }, el("i", { class: "dot warn" }), el("div", {}, el("div", { class: "ttl" }, `${r.fac} · ${r.work}`),
       el("button", { class: "small", onclick: () => openA(r.id) }, "평가 열기"))))));
   if (d.open_high.length) box.append(el("div", { class: "panel" }, el("h3", {}, "작업 전에 끝내야 할 조치"),
@@ -50,6 +54,48 @@ function renderDash() {
       d.open_high.map(x => el("tr", { style: { cursor: "pointer" }, onclick: () => openA(x.aid) }, el("td", {}, `${x.fac} · ${x.work}`), el("td", {}, x.item),
         el("td", {}, el("span", { class: "tag bad" }, x.R)), el("td", {}, x.measure), el("td", {}, x.owner || "-"),
         el("td", { style: { color: x.due && x.due < S.today ? "var(--bad)" : "" } }, x.due || "-"))))));
+}
+
+// ------------------------------------------------------------ 공공데이터: 날씨·재난문자
+function srcTag(r) { return el("span", { class: "tag " + (r.live ? "info" : "gray") }, r.live ? r.source : "예시 자료"); }
+
+function wxBox(w, extra) {
+  const warns = w.warnings || w.active || [];
+  return el("div", { class: "q wx" }, el("div", { class: "row" }, el("b", { style: { flex: 1 } }, `${w.region} 기상 · ${w.time}`), srcTag(w)),
+    el("div", {}, `기온 ${w.ta}℃ · 습도 ${w.rh}% → 체감온도 `, el("b", {}, `${w.feel}℃`), el("span", { class: "small muted" }, " (기상청 여름철 체감온도 식)")),
+    el("div", {}, "발표 중인 특보: ", warns.length ? warns.map(x => el("span", { class: "tag " + (x.level === "경보" ? "bad" : "warn"), style: { marginRight: "4px" } }, x.kind + x.level)) : "없음"),
+    (w.stops || []).map(t => el("div", { style: { color: "var(--bad)", fontWeight: 700 } }, "작업 중지: " + t)),
+    w.note ? el("div", { class: "small muted" }, w.note) : null, extra || null);
+}
+
+async function loadWx() {
+  const btn = $("#n-wx");
+  busy(btn, true, "불러오는 중");
+  try {
+    const w = await api("GET", "/api/feeds/weather");
+    $("#n-temp").value = w.feel; USEWX = true;
+    $("#n-wx-box").replaceChildren(wxBox(w, el("div", { class: "small muted" }, "평가를 만들면 이 체감온도와 특보로 작업 시작 여부를 함께 판정합니다.")));
+  } finally { busy(btn, false); }
+}
+
+async function renderMsgs(btn) {
+  busy(btn, true, "확인 중");
+  try { MSGS = await api("GET", "/api/feeds/messages"); } finally { busy(btn, false); }
+  const box = $("#msgs-body");
+  const hits = MSGS.items.reduce((n, m) => n + m.hits.filter(h => !h.done).length, 0);
+  box.replaceChildren(
+    el("div", { class: "row small" }, el("span", { class: "muted", style: { flex: 1 } }, `${MSGS.region} · 오늘 ${MSGS.items.length}건`), srcTag(MSGS)),
+    MSGS.note ? el("p", { class: "small muted" }, MSGS.note) : "",
+    ...(MSGS.items.length ? MSGS.items.map(m => el("div", { class: "finding" }, el("i", { class: "dot " + (m.hits.length ? "warn" : "ok") }),
+      el("div", { style: { flex: 1 } }, el("div", { class: "ttl" }, `${m.time} · ${m.kind || "안내"} ${m.step ? "· " + m.step : ""}`), el("div", {}, m.text),
+        m.hits.length ? el("div", { class: "small", style: { marginTop: "4px" } }, "다시 볼 평가: ",
+          m.hits.map(h => el("span", { class: "chip", style: { maxWidth: "none" }, onclick: () => openA(h.id) }, `${h.fac} · ${h.work} (${h.hazards.join(", ")})${h.done ? " · 수시평가 표시함" : ""}`)))
+          : el("div", { class: "small muted" }, "겹치는 위험요인이 있는 평가가 없습니다.")))) : [el("div", { class: "empty" }, "오늘 이 지역에 온 재난문자가 없습니다.")]),
+    hits ? el("button", { class: "primary", id: "msgs-apply", style: { marginTop: "10px" }, onclick: async () => {
+      const r = await api("POST", "/api/feeds/messages/apply", {});
+      toast(`${r.added}건의 평가에 '수시평가 필요'를 표시했습니다`);
+      await load(); await renderMsgs($("#msgs-btn"));
+    } }, `평가 ${hits}건에 수시평가 필요 표시하고 TBM에 넣기`) : "");
 }
 
 // ------------------------------------------------------------ 새 평가
@@ -70,8 +116,8 @@ async function runNew() {
   busy(btn, true, "평가 만드는 중");
   try {
     const a = await api("POST", "/api/assess", { fac: $("#n-fac").value, dept: $("#n-dept").value, work: $("#n-work").value,
-      text: $("#n-text").value, temp: $("#n-temp").value, photos: PHOTOS });
-    PHOTOS = []; $("#n-photo-list").textContent = ""; $("#n-photo").value = "";
+      text: $("#n-text").value, temp: $("#n-temp").value, photos: PHOTOS, use_weather: USEWX });
+    PHOTOS = []; $("#n-photo-list").textContent = ""; $("#n-photo").value = ""; USEWX = false; $("#n-wx-box").innerHTML = "";
     await load(); openA(a.id);
   } finally { busy(btn, false); }
 }
@@ -116,11 +162,13 @@ function renderDetail() {
     el("div", { class: "verdict " + (st.empty ? "warn" : st.ready ? "ok" : "bad"), style: { marginTop: "12px" } },
       el("div", {}, el("div", { class: "big" }, st.empty ? "평가가 끝나지 않음" : st.ready ? "작업 시작 가능" : "작업 전 조치 필요"),
         el("div", { class: "desc" }, st.empty ? "평가표에 들어간 위험요인이 없습니다. 아래 '빠진 위험요인 추가'로 위험요인을 넣어 주세요." : st.ready ? "작업 전에 끝내야 할 감소대책을 모두 마쳤습니다. 작업 중 관리 항목은 계속 지켜 주세요."
-          : `위험성 ${a.rules.high} 이상인 ${st.blocked.join(", ")}의 감소대책을 마치기 전에는 작업을 시작하지 않습니다(규정 기준).`))),
+          : [st.blocked.length ? `위험성 ${a.rules.high} 이상인 ${st.blocked.join(", ")}의 감소대책을 마치기 전에는 작업을 시작하지 않습니다(규정 기준). ` : "",
+            (st.weather_stops || []).length ? `기상특보: ${st.weather_stops.join(" / ")}(산업안전보건기준에 관한 규칙, 악천후·강풍 시 작업 중지).` : ""].join("")))),
+    a.weather ? wxBox(a.weather, el("button", { class: "small", style: { marginTop: "6px" }, onclick: async () => { CUR = await api("POST", `/api/assess/${a.id}/weather`, {}); renderDetail(); } }, "날씨 다시 확인")) : null,
     a.questions.map(q => el("div", { class: "q" }, "확인 필요: " + q)),
     a.permits.length ? el("div", { class: "q", style: { background: "var(--bad-soft)", color: "var(--bad)" } }, "작업 전 허가: ",
       a.permits.map(p => el("span", {}, p.name, " ", basisChip(p.basis)))) : null,
-    a.reassess.length ? el("div", { class: "q" }, el("b", {}, "수시평가 필요: "), a.reassess.map(r => el("div", {}, `${r.date} 아차사고 - ${r.text} `, basisChip(r.basis))),
+    a.reassess.length ? el("div", { class: "q" }, el("b", {}, "수시평가 필요: "), a.reassess.map(r => el("div", {}, `${r.date} ${r.kind || "아차사고"} - ${r.text} `, basisChip(r.basis))),
       el("button", { class: "small", style: { marginTop: "6px" }, onclick: () => save({ clear_reassess: true }) }, "다시 평가했음(표시 지우기)")) : null,
     a.notes.length ? el("div", { class: "small muted", style: { marginTop: "6px" } }, a.notes.map(n => el("div", {}, "※ " + n))) : null,
     a.photos.length ? el("div", { class: "photos", style: { marginTop: "10px" } }, a.photos.map(p => el("img", { src: `/api/photo/${p}`, alt: "현장 사진" }))) : null,
@@ -258,6 +306,7 @@ async function renderLog() {
 document.addEventListener("DOMContentLoaded", async () => {
   GO = setupTabs(id => { if (id === "log") renderLog(); if (id === "about") renderAbout(); });
   $("#n-run").addEventListener("click", runNew);
+  $("#n-wx").addEventListener("click", loadWx);
   $("#n-example").addEventListener("click", () => {
     $("#n-fac").value = "종합체육센터"; $("#n-dept").value = "체육사업팀"; $("#n-temp").value = "";
     $("#n-work").value = "체육관 천장 조명(등기구) 교체";

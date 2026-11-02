@@ -35,28 +35,24 @@
 </style>
 </head>
 <body>
-<div class="gov-strip"><b>2026 공공 AI 대전환 챌린지 출품작</b><span class="sep">|</span><span>시연용 모의자료 사용</span></div>
-<div class="masthead"><span class="ms-mark" aria-hidden="true">AI</span><b>공공기관 업무지원 AI 서비스</b><span class="ms-sub">현장 위험성평가 AI</span></div>
-<header class="top">
-  <span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 3 20h18z"/><path d="M12 10v4M12 17h.01"/></svg></span>
-  <div>
-    <div class="eyebrow">중대재해 예방 · 현장 안전</div>
-    <h1>현장 위험성평가 AI</h1>
-    <div class="sub">작업을 말하면, 위험성평가표와 오늘의 안전 회의가 나옵니다.</div>
-    <ul class="highlights"><li><b>3분 위험성평가</b><span>위험요인·가능성·중대성·감소대책을 근거와 함께</span></li><li><b>아차사고가 평가를 바꿉니다</b><span>같은 작업의 사고가 가능성을 올리고 수시평가를 알립니다</span></li><li><b>작업 전 회의(TBM)</b><span>낭독용 문안과 서명 기록지를 바로</span></li></ul>
-  </div>
-  <div class="spacer"></div>
-  <span id="llm-badge" class="llm-badge">모델: …</span>
-</header>
+<div class="gov-strip"><span class="pill">2026 공공 AI 대전환 챌린지</span><span class="sep">|</span><span class="live"><i></i>시연용 모의자료 사용 중</span><span class="sep2">및</span><span>평가마다 기준·근거 함께 표시 · 아차사고 자동 반영</span></div>
+<div class="masthead"><span class="ms-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 3 20h18z"/><path d="M12 10v4M12 17h.01"/></svg></span><span class="ms-name"><b>현장 위험성평가 AI</b><small>SAFETY · AI</small></span><span class="ms-org">공공기관 업무지원 AI 서비스</span><div class="spacer"></div><span id="llm-badge" class="llm-badge">모델: …</span></div>
 <nav class="tabs">
-  <button data-tab="dash">현황</button>
-  <button data-tab="new">새 위험성평가</button>
-  <button data-tab="list">평가 목록</button>
-  <button data-tab="inc">아차사고</button>
-  <button data-tab="lib">기준·자료</button>
-  <button data-tab="log">작업 기록</button>
-  <button data-tab="about">서비스 구조·검증</button>
+  <button data-tab="dash"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>현황</button>
+  <button data-tab="new"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>새 위험성평가</button>
+  <button data-tab="list"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>평가 목록</button>
+  <button data-tab="inc"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 20h18z"/><path d="M12 10v4M12 17h.01"/></svg>아차사고</button>
+  <button data-tab="lib"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>기준·자료</button>
+  <button data-tab="log"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>작업 기록</button>
+  <button data-tab="about"><svg class="ni" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>서비스 구조·검증</button>
 </nav>
+<header class="top hero">
+  <h1><span>작업을 말하면,</span> <em>위험성평가가 나옵니다<i>.</i></em></h1>
+  <p class="hero-sub">오늘 할 작업을 적으면 위험요인과 가능성·중대성, 감소대책을 근거와 함께 정리합니다.<br>아차사고 기록을 반영하고, 작업 전 안전 회의(TBM) 문안까지 바로 만들어 드려요.</p>
+  
+  <button type="button" class="callout" onclick="document.querySelector('nav.tabs button[data-tab=new]').click()"><span class="co-icons" aria-hidden="true"><i><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg></i><i><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></i></span><span class="co-text"><b>오늘 작업 전이라면? 3분 위험성평가 시작</b><span>작업 모습만 평소 말로 적으면 위험요인과 작업 시작 가능 여부를 판정해 드려요.</span></span><svg class="co-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+  <ul class="trust"><li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>3분 위험성평가</li><li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>아차사고 반영 수시평가</li><li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>TBM 문안·서명 기록지</li><li><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>모델 없이도 규칙 기반 동작</li></ul>
+</header>
 <main>
   <section class="tab" id="tab-dash"></section>
   <section class="tab" id="tab-new" hidden>
@@ -67,8 +63,9 @@
       <div class="grid3">
         <div><label class="f">시설</label><input id="n-fac" class="wide" placeholder="예: 종합체육센터"></div>
         <div><label class="f">부서</label><input id="n-dept" class="wide" placeholder="예: 체육사업팀"></div>
-        <div><label class="f">체감온도(℃, 실외 작업이면)</label><input id="n-temp" class="wide" placeholder="예: 34"></div>
+        <div><label class="f">체감온도(℃, 실외 작업이면)</label><div class="row" style="flex-wrap:nowrap"><input id="n-temp" class="wide" placeholder="예: 34"><button class="small" id="n-wx" style="white-space:nowrap" title="기상청 기온·습도로 체감온도를 계산하고 기상특보를 확인합니다">기상청 날씨</button></div></div>
       </div>
+      <div id="n-wx-box"></div>
       <label class="f">작업</label><input id="n-work" class="wide" placeholder="예: 체육관 천장 조명(등기구) 교체">
       <label class="f">작업 설명</label>
       <textarea id="n-text" class="wide" rows="3" placeholder='예: "이동식 일자 사다리로 높이 4m 등기구 안정기 교체. 혼자 작업, 바닥 왁스 청소 직후"'></textarea>
