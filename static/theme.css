@@ -1,0 +1,39 @@
+/* 현장 위험성평가 AI 고유 화면: '현장 안전'. 안전 노랑·검정 사선 띠, 주황 경고, 굵은 표지판 글자 */
+:root {
+  --bg: #f3f3f0; --panel: #ffffff; --ink: #151515; --muted: #5d5d58; --line: #e3e3dd; --line-strong: #cacac2;
+  --brand: #e85d04; --brand-strong: #c44d00; --brand-soft: #fff0e5; --navy: #151515; --navy-2: #2a2a2a;
+  --hazard: #ffcc00;
+  --shadow: 0 1px 0 rgba(0, 0, 0, .05), 0 8px 22px rgba(0, 0, 0, .07);
+  --focus: 0 0 0 3px rgba(255, 204, 0, .7);
+}
+::selection { background: var(--hazard); color: var(--ink); }
+.gov-strip { background: #000; }
+.masthead { background: var(--hazard); border-bottom: 3px solid var(--ink); }
+.masthead b { color: var(--ink); font-weight: 900; } .masthead .ms-sub { color: #3a3a35; border-left-color: rgba(0, 0, 0, .3); }
+.masthead .ms-mark { background: var(--ink); color: var(--hazard); border-radius: 4px; }
+/* 머리: 검정 바탕 + 위아래 안전 사선 띠 */
+header.top { background: var(--ink); color: #fff; overflow: hidden; padding-bottom: 76px; }
+header.top::before, header.top::after { content: ""; position: absolute; left: 0; right: 0; height: 16px; pointer-events: none;
+  background: repeating-linear-gradient(-45deg, var(--hazard) 0 18px, var(--ink) 18px 36px); }
+header.top::before { top: 0; } header.top::after { bottom: 0; }
+header.top .mark { background: var(--hazard); border-radius: 6px; transform: rotate(45deg); box-shadow: 0 0 0 4px var(--ink), 0 0 0 7px var(--hazard); }
+header.top .mark svg { stroke: var(--ink); transform: rotate(-45deg); }
+header.top .eyebrow { display: inline-block; background: var(--brand); color: #fff; padding: 4px 12px; font-weight: 800; letter-spacing: .08em; border-radius: 2px; }
+header.top h1 { color: #fff; font-weight: 900; letter-spacing: -.03em; text-transform: uppercase; }
+header.top h1::after { content: ""; display: block; width: 120px; height: 8px; margin: 16px auto 0; background: var(--hazard); }
+header.top .sub { color: rgba(255, 255, 255, .82); }
+header.top .highlights li { background: #222; border: 0; border-left: 6px solid var(--hazard); border-radius: 2px; padding: 14px 18px; }
+header.top .highlights b { color: var(--hazard); } header.top .highlights span { color: rgba(255, 255, 255, .7); }
+/* 탭: 표지판 */
+nav.tabs { background: rgba(255, 255, 255, .96); border-bottom: 3px solid var(--ink); }
+nav.tabs button { border-radius: 2px; font-weight: 800; color: #444; }
+nav.tabs button.on, nav.tabs .tab-ink { background: var(--hazard); }
+nav.tabs button.on, nav.tabs.inked button.on { color: var(--ink); }
+/* 카드: 점검표 */
+.panel { border-radius: 4px; border: 2px solid var(--ink); box-shadow: 6px 6px 0 rgba(0, 0, 0, .08); }
+.panel h2 { font-weight: 900; text-transform: uppercase; }
+.panel h2::before { content: ""; display: inline-block; width: 12px; height: 22px; margin-right: 10px; vertical-align: -3px;
+  background: repeating-linear-gradient(-45deg, var(--hazard) 0 4px, var(--ink) 4px 8px); }
+button.primary { background: var(--brand); border-color: var(--brand); border-radius: 2px; font-weight: 800; }
+.chip { border-radius: 2px; }
+.foot { background: var(--ink); color: rgba(255, 255, 255, .6); border-top: 6px solid var(--hazard); }
