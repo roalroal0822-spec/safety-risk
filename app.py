@@ -25,13 +25,13 @@ HERE = Path(__file__).resolve().parent
 SAMPLE = HERE / "sample_data"
 IMG = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 
-cfg = Config(HERE, {"app_title": "현장 위험성평가 AI", "port": 8105})
+cfg = Config(HERE, {"app_title": "무사히(현장 위험성평가 AI)", "port": 8105})
 llm = LLM(cfg["llm"])
 store = Store(cfg.data_dir)
 KB_ROOT = store.path("kb")
 PHOTOS = store.path("photos")
 app = App(HERE / "static")
-webcommon.register(app, cfg, llm, "현장 위험성평가 AI", VERSION)
+webcommon.register(app, cfg, llm, "무사히(현장 위험성평가 AI)", VERSION)
 ABOUT = {
     "lead": "위험요인 찾기·가능성·중대성·작업 시작 판정은 규칙과 기관 규정으로 하고, 모델은 낱말로 못 찾은 위험을 '제안'만 합니다. 모델이 없어도 같은 결과가 나옵니다.",
     "pipeline": [("작업 설명 읽기", "높이·인원·체감온도·운영 중·실외 여부를 읽고, 개인정보는 먼저 가림"),
@@ -342,7 +342,7 @@ def export_sheet(req):
     if a["reassess"]:
         blocks += [("h2", "수시평가 사유")] + [("bullet", f"{r['date']} {r.get('kind', '아차사고')}: {r['text']}") for r in a["reassess"]]
     blocks += [("h2", "평가 참여자 확인"), ("table", ["구분", "성명", "서명"], [["작업 책임자", "", ""], ["작업자", "", ""], ["작업자", "", ""], ["안전 담당", "", ""]], [2, 3, 3]),
-               ("note", f"※ 작성: 현장 위험성평가 AI({a['engine']}). 위험요인·가능성·중대성은 담당자가 현장에서 확인해 고친 값입니다. 기록은 규정에 따라 보존합니다.")]
+               ("note", f"※ 작성: 무사히(현장 위험성평가 AI, {a['engine']}). 위험요인·가능성·중대성은 담당자가 현장에서 확인해 고친 값입니다. 기록은 규정에 따라 보존합니다.")]
     fmt = req.query.get("fmt", "hwpx")
     data, ctype = export(blocks, fmt)
     log("위험성평가표 내보내기", a["work"])
@@ -379,7 +379,7 @@ def ledger_xlsx(req):
     data = workbook([("평가 대장", ["평가일", "시설", "부서", "작업", "상태", "판정", "위험요인", "가능성", "중대성", "위험성", "판단", "미완료 조치", "수시평가"],
                       rows, [11, 12, 12, 30, 8, 16, 30, 8, 8, 8, 16, 10, 12]),
                      ("정기 평가 대상 작업", ["부서", "시설", "작업", "작업 주기", f"{s['today'][:4]}년 평가 상태", "마지막 평가일"], tasks, [12, 12, 30, 10, 18, 12])],
-                    note=f"현장 위험성평가 AI {VERSION} · 작성일 {s['today']}")
+                    note=f"무사히(현장 위험성평가 AI) {VERSION} · 작성일 {s['today']}")
     log("위험성평가 대장 엑셀")
     return file_response(data, f"위험성평가대장_{s['today']}.xlsx", XLSX)
 
@@ -557,13 +557,13 @@ def get_log(req):
 
 def main():
     import argparse
-    ap = argparse.ArgumentParser(description="현장 위험성평가 AI 실행")
+    ap = argparse.ArgumentParser(description="무사히(현장 위험성평가 AI) 실행")
     ap.add_argument("--port", type=int, default=cfg["port"])
     ap.add_argument("--host", default=cfg["host"])
     ap.add_argument("--no-browser", action="store_true")
     ar = ap.parse_args()
     kb()
-    app.run(ar.host, ar.port, not ar.no_browser, "현장 위험성평가 AI")
+    app.run(ar.host, ar.port, not ar.no_browser, "무사히(현장 위험성평가 AI)")
 
 
 if __name__ == "__main__":
