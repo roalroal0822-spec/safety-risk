@@ -19,6 +19,7 @@ from core.xlsx import CTYPE as XLSX, workbook
 import ai
 import assess
 import feeds
+import laws
 from kb import KB
 
 VERSION = "1.1.0"
@@ -40,6 +41,7 @@ ABOUT = {
                  ("가능성·중대성", "조건과 최근 같은 작업의 아차사고로 조정, 조정마다 이유와 원본 행"),
                  ("규정 기준 판정", "위험성 6 이상은 작업 전 감소대책 완료(규정 조문에서 읽은 값)"),
                  ("모델 제안(선택)", "목록에 있는 코드이고 근거 문구가 설명에 그대로 있어야 받음, 사진은 '현장 확인 필요'"),
+                 ("법령 원문(공공데이터)", "위험요인의 관련 기준(법령명·주제)으로 법제처 Open API에서 조문을 찾아 원문·시행일을 붙임, 평가표·해설·물어보기의 근거로 씀"),
                  ("날씨·재난문자", "기상청 체감온도·기상특보로 작업 시작 판정, 긴급재난문자와 겹치는 평가에 수시평가 표시"),
                  ("평가표·TBM", "평가표·TBM 문안·서명지, 아차사고가 나면 수시평가 표시"),
                  ("오늘 작업 브리핑", "기상청 체감온도·특보, 재난문자, 아차사고, 미완료 조치를 평가마다 엮어 작업 중지·시작 전 조치·주의·시작 가능을 규칙으로 판정, AI는 우선순위 문장만"),
@@ -51,14 +53,14 @@ ABOUT = {
                "위험요인을 하나도 찾지 못하면 '작업 시작 가능'이 아니라 '평가가 끝나지 않음'으로 막습니다.",
                "높이 2m 이상 작업인데 떨어짐을 찾지 못하면 지어내지 않고 먼저 묻습니다.",
                "현장에서 보탠 낱말은 작업 설명에 실제로 있던 말만 받고, 따로 표시하며 뺄 수 있습니다.",
-               "관련 기준은 법령 이름과 주제까지만 적고, 조문 번호를 지어내지 않습니다.",
+               "관련 기준은 법령 이름과 주제까지만 적고, 조문 번호와 본문은 법제처 Open API에서 받은 원문만 씁니다. 받지 못하면 조문을 지어내지 않고 국가법령정보센터 링크만 둡니다.",
                "기상특보에 따른 작업 중지는 특보 종류와 작업 조건(실외·높은 곳)으로 규칙만으로 판정하고, 체감온도는 기상청 공개 식으로 계산합니다.",
                "작업 설명·아차사고에 적은 개인정보(전화·주민번호·계좌 등)는 저장·모델 전달 전에 ○○○로 가립니다.",
                "AI가 쓴 문장(답변·해설·종합 의견·TBM 문안·브리핑)에 근거 사실에 없는 숫자나 위험요인 코드가 하나라도 있으면 버리고 규칙 문장을 쓰며, 이유를 화면에 표시합니다.",
                "공개 시연판은 화면에서 모델 설정을 바꿀 수 없고(키 유출 방지), 모델 호출은 1분에 40번으로 묶습니다."],
     "data": ["시연 자료(위험요인 목록·규정·작업·아차사고)는 모두 지어낸 모의자료입니다. 기관 자료로 바꾸면 그대로 동작합니다.",
              "날씨(기상청 단기예보·기상특보)와 긴급재난문자(행정안전부)는 키를 넣으면 실제 자료를, 키가 없거나 연결이 안 되면 예시 자료를 쓰고 화면에 출처를 표시합니다.",
-             "관련 기준의 세부 조문은 국가법령정보센터에서 확인하도록 했습니다.",
+             "관련 법령 조문은 법제처 국가법령정보 공동활용 Open API(인증값 LAW_OC)에서 받고, 인증값이 없으면 국가법령정보센터 링크만 보여 줍니다.",
              "시연용 사진은 그림이며, 실제 비전 모델의 정확도는 기관 PC에서 실측해야 합니다.",
              "자료는 이 PC의 작업 폴더(data)에만 저장되고, 화면은 이 PC에서만 열립니다."],
 }
@@ -328,7 +330,7 @@ def sheet_blocks(a):
               ("p", f"판단 기준: 위험성 = 가능성(1~3) × 중대성(1~3). {a['rules']['high']} 이상은 작업 전 감소대책 완료, {a['rules']['mid']} 이상은 작업 중 관리."),
               ("table", ["번호", "유해·위험요인", "재해 형태", "가능성", "중대성", "위험성", "판단", "감소대책(담당·기한)", "개선 후", "관련 기준"],
                [[str(n), it["name"] + (" (사진 확인)" if it.get("photo") else ""), it["type"], it["L"], it["S"], it["R"], it["level_label"],
-                 _mlist(it), it["R_after"], it["law"] + (f" / {it['basis']['reg']} {it['basis']['label']}" if it.get("basis") else "")]
+                 _mlist(it), it["R_after"], _law_cell(it)]
                 for n, it in enumerate(items, 1)], [1, 4, 2, 1, 1, 1, 2, 7, 1, 4])]
     reasons = [(it["name"], r) for it in items for r in it["reasons"]]
     if reasons:
@@ -339,6 +341,10 @@ def sheet_blocks(a):
                    ("bullet", f"{wx['region']} {wx['time']}: 기온 {wx['ta']:g}℃, 습도 {wx['rh']:g}%, 체감온도 {wx['feel']:g}℃ (출처: {wx['source']})"),
                    ("bullet", "발표 중인 특보: " + (", ".join(w["kind"] + w["level"] for w in wx["warnings"]) or "없음"))] + [
                    ("bullet", "작업 중지: " + t + " (관련 기준: 산업안전보건기준에 관한 규칙, 악천후·강풍 시 작업 중지)") for t in wx["stops"]]
+    law_arts = [(it["name"], x) for it in items for x in laws.articles_for(it["law"])["items"]]
+    if law_arts:
+        blocks += [("h2", f"관련 법령 조문(출처: {laws.SRC})")] + [
+            ("bullet", f"{n}: {laws.cite(x)}" + (f", 시행 {x['date']}" if x["date"] else "") + f" — {x['text'][:300]}") for n, x in law_arts]
     if a["permits"]:
         blocks += [("h2", "작업 전 필요한 허가")] + [("bullet", p["name"] + (f" (근거: {p['basis']['reg']} {p['basis']['label']})" if p.get("basis") else "")) for p in a["permits"]]
     if a["reassess"]:
@@ -406,7 +412,7 @@ def export_xlsx(req):
     a = get_a(req.params["aid"])
     items = [i for i in a["items"] if i["confirmed"]]
     rows = [[n, i["name"], i["type"], i["L"], i["S"], i["R"], i["level_label"], _mlist(i), i["R_after"],
-             "; ".join(r["text"] for r in i["reasons"]), i["law"] + (f" / {i['basis']['reg']} {i['basis']['label']}" if i.get("basis") else "")]
+             "; ".join(r["text"] for r in i["reasons"]), _law_cell(i)]
             for n, i in enumerate(items, 1)]
     data = workbook([("위험성평가표", ["번호", "유해·위험요인", "재해 형태", "가능성", "중대성", "위험성", "판단", "감소대책(담당·기한)", "개선 후", "판단 이유", "관련 기준"],
                       rows, [6, 30, 12, 8, 8, 8, 16, 50, 8, 50, 40])],
@@ -486,6 +492,21 @@ def tbm_doc(req):
     return file_response(data, f"TBM기록_{a['work'][:20]}.{fmt}", ctype)
 
 
+def _law_cell(it):
+    arts = laws.articles_for(it["law"])["items"]
+    s = "; ".join(laws.cite(x) for x in arts) or it["law"]
+    return s + (f" / {it['basis']['reg']} {it['basis']['label']}" if it.get("basis") else "")
+
+
+@app.get("/api/laws/<code>")
+def law_articles(req):
+    """위험요인의 관련 법령 조문 원문(법제처 Open API). 키가 없으면 링크만."""
+    h = kb().hazards.get(req.params["code"])
+    if not h:
+        raise HttpError(404, "위험요인을 찾지 못했습니다")
+    return dict(laws.articles_for(h["law"]), code=h["code"], law_text=h["law"])
+
+
 # ------------------------------------------------------------ 생성형 AI(사실 대조)
 
 def _item_facts(a, it):
@@ -495,6 +516,7 @@ def _item_facts(a, it):
     f += [f"감소대책: {m['text']}" + (" (완료)" if m["done"] else "") for m in it["measures"]]
     if it.get("law"):
         f.append(f"관련 기준: {it['law']}")
+        f += [f"법령 원문 {laws.cite(x)}: {x['text'][:500]}" for x in laws.articles_for(it["law"])["items"]]
     if it.get("basis"):
         f.append(f"기관 규정: {it['basis']['reg']} {it['basis']['label']}({it['basis']['title']})")
     return f

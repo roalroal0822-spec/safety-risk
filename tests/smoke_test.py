@@ -53,6 +53,9 @@ def checks(c):
     k = s["kb"]
     yield f"기관 자료(위험요인 {k['hazards']}, 작업 {k['tasks']}, 아차사고 {k['incidents']})", k["hazards"] == 12 and k["tasks"] == 9 and k["incidents"] == 4
     yield "판단 기준을 규정 조문에서 읽음", [r["value"] for r in k["rules"][:2]] == [6, 3] and all(r["basis"] for r in k["rules"][:2])
+    lw = c.call("GET", "/api/laws/H01")
+    yield "법제처 인증값 없으면 조문을 지어내지 않고 국가법령정보센터 링크만", not lw["live"] and not lw["items"] and lw["refs"][0]["url"].startswith("https://www.law.go.kr/") and "LAW_OC" in lw["note"]
+    yield "기관 규정(이용객 안전)은 법령 조회 대상 아님", c.call("GET", "/api/laws/H12")["refs"] == []
     a = c.call("POST", "/api/assess", {"fac": "종합체육센터", "dept": "체육사업팀", "work": "체육관 천장 조명(등기구) 교체",
                                        "text": "이동식 일자 사다리로 높이 4m 등기구 안정기 교체. 혼자 작업, 바닥 왁스 청소 직후"})
     codes = [i["code"] for i in a["items"]]
@@ -138,6 +141,60 @@ def checks(c):
     yield "평가표 미리보기에서 고친 내용·사진으로 한글 내려받기", "화면에서 고침" in z.read("Contents/section0.xml").decode() and any(n.startswith("BinData/") for n in z.namelist())
 
 
+def fake_law():
+    """법제처 Open API 흉내. 조문 본문은 시험용 문장(실제 법령 아님)."""
+    import threading
+    import urllib.parse as up
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    LAWS = {"산업안전보건기준에 관한 규칙": [("42", "", "추락의 방지", "① 시험용 문장: 추락 위험 장소에는 작업발판을 설치한다."),
+                                         ("301", "", "전기 기계ㆍ기구 등의 충전부 방호", "① 시험용 문장: 감전 방지 조치."),
+                                         ("3", "", "전도의 방지", "① 시험용 문장: 바닥은 미끄러지지 않게 한다.")],
+            "산업안전보건법": [("114", "", "물질안전보건자료의 게시 및 교육", "① 시험용 문장: 물질안전보건자료를 게시한다.")]}
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            u = up.urlparse(self.path)
+            q = dict(up.parse_qsl(u.query))
+            H.seen.append(q)
+            names = list(LAWS)
+            if u.path.endswith("lawSearch.do"):
+                out = {"LawSearch": {"law": [{"법령일련번호": str(i + 1), "법령명한글": n, "시행일자": "20250101"}
+                                             for i, n in enumerate(names) if q.get("query") == n]}}
+            else:
+                n = names[int(q["MST"]) - 1]
+                out = {"법령": {"기본정보": {"법령명_한글": n, "시행일자": "20250101"},
+                               "조문": {"조문단위": [{"조문번호": no, "조문가지번호": g, "조문여부": "조문", "조문제목": t, "조문시행일자": "20250101",
+                                                    "조문내용": f"제{no}조({t})", "항": [{"항내용": body}]} for no, g, t, body in LAWS[n]]}}}
+            b = json.dumps(out, ensure_ascii=False).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b)
+
+        def log_message(self, *a):
+            pass
+
+    H.seen = []
+    s = HTTPServer(("127.0.0.1", 0), H)
+    s.seen = H.seen
+    threading.Thread(target=s.serve_forever, daemon=True).start()
+    return s
+
+
+def law_checks(c, fs):
+    r = c.call("GET", "/api/laws/H01")
+    yield f"법제처 Open API: 떨어짐 → {r['items'][0]['law']} {r['items'][0]['no']}" if r["items"] else "법제처 Open API 조문 받기", \
+        r["live"] and r["items"] and r["items"][0]["no"] == "제42조" and "시험용" in r["items"][0]["text"] and fs.seen[-1].get("OC") == "test-oc"
+    r6 = c.call("GET", "/api/laws/H06")
+    yield "법제처 Open API: 염소·약품 → 산업안전보건법 제114조", r6["items"] and r6["items"][0]["no"] == "제114조"
+    ans = c.call("POST", "/api/ask", {"q": "사다리 작업 안전 기준은?"})
+    yield "물어보기 근거에 법령 원문 조문", any(f.startswith("법령 원문 산업안전보건기준에 관한 규칙 제42조") for f in ans["facts"])
+    a = c.call("POST", "/api/assess", {"fac": "종합체육센터", "dept": "체육사업팀", "work": "등기구 교체", "text": "사다리로 높이 3m 등기구 교체"})
+    pv = json.dumps(c.call("GET", f"/api/assess/{a['id']}/preview"), ensure_ascii=False)
+    yield "평가표에 관련 법령 조문(제42조) 표·절", "제42조" in pv and "관련 법령 조문" in pv
+
+
 def fake_llm():
     """OpenAI 호환 모델 서버 흉내(업스테이지 솔라 등). 사실 첫 줄로 답하고, 질문에 '거짓'이 있으면 사실에 없는 숫자·코드를 지어낸다."""
     import threading
@@ -211,6 +268,8 @@ def main():
     env = dict(os.environ, APP_DATA_DIR=tmp, LLM_PROVIDER="none")
     env.pop("DATA_GO_KR_KEY", None)
     env.pop("SAFETYDATA_KEY", None)
+    env.pop("KMA_APIHUB_KEY", None)
+    env.pop("LAW_OC", None)
     proc = subprocess.Popen([sys.executable, "run.py", "--no-browser", "--port", str(port)], cwd=ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     total = failed = 0
@@ -249,6 +308,27 @@ def main():
         finally:
             proc2.terminate()
             shutil.rmtree(tmp2, ignore_errors=True)
+        fs = fake_law()
+        tmp3 = tempfile.mkdtemp(prefix="smoke-safety-law-")
+        env3 = dict(env, APP_DATA_DIR=tmp3, LAW_OC="test-oc", LAW_API_BASE=f"http://127.0.0.1:{fs.server_port}/DRF")
+        port3 = free_port()
+        proc3 = subprocess.Popen([sys.executable, "run.py", "--no-browser", "--port", str(port3)], cwd=ROOT, env=env3,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            c3 = Client(port3)
+            for _ in range(60):
+                try:
+                    c3.call("GET", "/api/info")
+                    break
+                except Exception:
+                    time.sleep(0.3)
+            for label, ok in law_checks(c3, fs):
+                total += 1
+                failed += 0 if ok else 1
+                print(f"  {'통과' if ok else '실패'}  {label}")
+        finally:
+            proc3.terminate()
+            shutil.rmtree(tmp3, ignore_errors=True)
     except Exception as e:
         total += 1
         failed += 1

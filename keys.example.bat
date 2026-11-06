@@ -6,6 +6,8 @@ rem 또는 기상청 API허브(apihub.kma.go.kr) 인증키: 초단기실황·기
 set KMA_APIHUB_KEY=
 rem 재난안전데이터공유플랫폼(safetydata.go.kr) 인증키: 긴급재난문자
 set SAFETYDATA_KEY=
+rem 법제처 국가법령정보 공동활용(open.law.go.kr) API 인증값(OC): 관련 법령 조문 원문
+set LAW_OC=
 rem 기관 위치(선택): 재난문자 지역, 기상청 격자 nx ny, 특보 지점 번호
 rem set DISASTER_REGION=서울특별시 도봉구
 rem set WEATHER_NX=61

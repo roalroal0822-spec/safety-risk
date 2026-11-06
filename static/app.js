@@ -202,7 +202,7 @@ function renderDetail() {
         el("input", { type: "text", value: m.owner, placeholder: "담당", onchange: e => save({ items: [{ code: it.code, measures: it.measures.map((_, j) => j === i ? { owner: e.target.value } : {}) }] }) }),
         el("input", { type: "date", value: m.due, onchange: e => save({ items: [{ code: it.code, measures: it.measures.map((_, j) => j === i ? { due: e.target.value } : {}) }] }) })))),
       el("div", { class: "row small", style: { marginTop: "8px" } }, el("span", { class: "muted" }, "관련 기준: " + (it.law || "-")), basisChip(it.basis),
-        citeChips([it.src]), el("span", { style: { flex: 1 } }),
+        citeChips([it.src]), it.law ? el("button", { class: "small", onclick: e => toggleLaw(e.target, it.code) }, "법령 원문") : null, el("span", { style: { flex: 1 } }),
         el("button", { class: "small", onclick: async () => { CUR = await api("POST", `/api/assess/${a.id}/remove`, { code: it.code }); renderDetail(); } }, "빼기"))));
   }
   const have = new Set(a.items.map(i => i.code));
@@ -542,3 +542,25 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   await load();
 });
+
+
+// 법제처 Open API 조문 원문(키가 없으면 국가법령정보센터 링크만)
+async function toggleLaw(btn, code) {
+  const card = btn.closest(".row");
+  const old = card.nextElementSibling;
+  if (old && old.classList.contains("law-box")) { old.remove(); return; }
+  btn.disabled = true;
+  try {
+    const r = await api("GET", `/api/laws/${code}`);
+    const box = el("div", { class: "law-box" },
+      el("div", { class: "small muted" }, r.live ? `출처: ${r.source} (실시간)` : "출처: 국가법령정보센터 링크(법제처 인증값 없음)"),
+      r.items.map(x => el("div", { class: "law-art" },
+        el("div", {}, el("b", {}, `${x.law} ${x.no}`), x.title ? ` (${x.title})` : "", x.date ? el("span", { class: "small muted" }, `  시행 ${x.date}`) : null,
+          " ", el("a", { href: x.url, target: "_blank", rel: "noopener", class: "small" }, "원문 보기")),
+        el("div", { class: "law-text" }, x.text))),
+      !r.items.length ? r.refs.map(f => el("div", {}, el("a", { href: f.url, target: "_blank", rel: "noopener" }, f.law + " 원문 보기(국가법령정보센터)"))) : null,
+      r.note ? el("div", { class: "small muted" }, r.note) : null);
+    card.after(box);
+  } catch (e) { toast(e.message, true); }
+  btn.disabled = false;
+}

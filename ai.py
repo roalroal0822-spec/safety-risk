@@ -9,6 +9,7 @@ from collections import deque
 from datetime import date
 
 import assess
+import laws
 import feeds
 from core.llm import LLMError
 
@@ -112,6 +113,10 @@ def ask_facts(k, q, items, today):
         srcs.append(h["src"])
         lines.append(f"{h['name']}({h['type']}) 위험은 이렇게 줄입니다: " + "; ".join(h["measures"][:4]) + "."
                      + (f" 관련 기준: {h['law']}." if h["law"] else ""))
+        for x in laws.articles_for(h["law"], 1)["items"]:
+            facts.append(f"법령 원문 {laws.cite(x)}" + (f"(시행 {x['date']})" if x["date"] else "") + f": {x['text'][:500]}")
+            srcs.append({"file": laws.SRC, "loc": laws.cite(x), "quote": x["text"][:160]})
+            lines.append(f"법령 원문 {laws.cite(x)}: {x['text'][:200]}")
     for key, b in k.basis.items():
         if any(w in b["label"] for w in _words(q)) or (key == "height" and re.search(r"높|사다리|m\b|미터", q)) \
                 or (key.startswith("heat") and re.search(r"폭염|더위|체감", q)):

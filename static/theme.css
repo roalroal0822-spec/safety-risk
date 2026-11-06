@@ -249,3 +249,7 @@ body.on-home main { padding-top: 0; }
 .chat-turn { margin-bottom: 10px; }
 .chat-q { font-weight: 700; font-size: 15px; }
 .chat-q::before { content: "Q. "; color: var(--brand); }
+
+.law-box { margin-top: 8px; padding: 10px 12px; border: 1px solid var(--line, #ddd); border-radius: 8px; background: var(--fill); }
+.law-art { margin-top: 8px; }
+.law-text { white-space: pre-wrap; font-size: 13px; line-height: 1.6; margin-top: 4px; max-height: 220px; overflow: auto; }

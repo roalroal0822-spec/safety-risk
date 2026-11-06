@@ -32,5 +32,7 @@ services:
         sync: false
       - key: KMA_APIHUB_KEY
         sync: false
+      - key: LAW_OC
+        sync: false
       - key: SAFETYDATA_KEY
         sync: false
