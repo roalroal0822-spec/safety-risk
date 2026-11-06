@@ -1,0 +1,707 @@
+{
+ "date": "2026-11-06",
+ "n": 60,
+ "machine": "Linux x86_64, Python 3.13.16",
+ "assess_ms": {
+  "median": 7.1,
+  "max": 13.8,
+  "mean": 7.5
+ },
+ "hwpx_ms": {
+  "median": 112.2,
+  "max": 330.5,
+  "mean": 120.6
+ },
+ "tbm_ms": {
+  "median": 141.5,
+  "max": 216.6,
+  "mean": 148.1
+ },
+ "typed": {
+  "median": 17.0,
+  "max": 30,
+  "mean": 17.3
+ },
+ "hazards": {
+  "median": 1.0,
+  "max": 4,
+  "mean": 1.2
+ },
+ "measures": {
+  "median": 4.0,
+  "max": 13,
+  "mean": 4.2
+ },
+ "reasons": {
+  "median": 0.0,
+  "max": 2,
+  "mean": 0.2
+ },
+ "laws": {
+  "median": 1.0,
+  "max": 4,
+  "mean": 1.2
+ },
+ "rows": [
+  {
+   "work": "분전반 점검",
+   "typed": 16,
+   "assess_ms": 5.943269999988843,
+   "hwpx_ms": 330.49630099992555,
+   "tbm_ms": 147.33137700000043,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "저수조 청소",
+   "typed": 18,
+   "assess_ms": 3.7958749999233987,
+   "hwpx_ms": 116.78383500009204,
+   "tbm_ms": 184.77860899997722,
+   "hazards": 1,
+   "measures": 5,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "냉각탑 점검",
+   "typed": 28,
+   "assess_ms": 3.2482530000379484,
+   "hwpx_ms": 130.7263989999683,
+   "tbm_ms": 152.60831299997335,
+   "hazards": 2,
+   "measures": 8,
+   "reasons": 1,
+   "laws": 2
+  },
+  {
+   "work": "수영장 청소",
+   "typed": 16,
+   "assess_ms": 3.7453699999332457,
+   "hwpx_ms": 105.76498299997183,
+   "tbm_ms": 141.748548999999,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "약품 보충",
+   "typed": 19,
+   "assess_ms": 4.830411000057211,
+   "hwpx_ms": 108.13352200000281,
+   "tbm_ms": 138.0971959999897,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 1,
+   "laws": 1
+  },
+  {
+   "work": "차선 도색",
+   "typed": 19,
+   "assess_ms": 3.7831760000699433,
+   "hwpx_ms": 99.75360700002511,
+   "tbm_ms": 171.09227700007068,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "물품 정리",
+   "typed": 21,
+   "assess_ms": 5.014874999915264,
+   "hwpx_ms": 137.78631700006372,
+   "tbm_ms": 147.2253219999402,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "배관 보수",
+   "typed": 13,
+   "assess_ms": 5.153102999997827,
+   "hwpx_ms": 108.50412099989626,
+   "tbm_ms": 140.18193699996573,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "로비 조명",
+   "typed": 30,
+   "assess_ms": 4.494386999908784,
+   "hwpx_ms": 178.24357500001042,
+   "tbm_ms": 160.3374139999687,
+   "hazards": 4,
+   "measures": 13,
+   "reasons": 2,
+   "laws": 4
+  },
+  {
+   "work": "펌프 정비",
+   "typed": 17,
+   "assess_ms": 4.271767999966869,
+   "hwpx_ms": 100.358124999957,
+   "tbm_ms": 134.8581350000586,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "정화조 점검",
+   "typed": 15,
+   "assess_ms": 4.637677999994594,
+   "hwpx_ms": 122.07762499997443,
+   "tbm_ms": 128.107894999971,
+   "hazards": 1,
+   "measures": 5,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "샤워실 보수",
+   "typed": 15,
+   "assess_ms": 5.152829000053316,
+   "hwpx_ms": 98.86901200002285,
+   "tbm_ms": 155.41379199999028,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "공조기 정비",
+   "typed": 15,
+   "assess_ms": 4.6901609999849825,
+   "hwpx_ms": 122.60124600004474,
+   "tbm_ms": 141.68196799994348,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "에스컬레이터 점검",
+   "typed": 26,
+   "assess_ms": 6.002313999942999,
+   "hwpx_ms": 125.90030799992746,
+   "tbm_ms": 177.33228900010545,
+   "hazards": 2,
+   "measures": 6,
+   "reasons": 1,
+   "laws": 2
+  },
+  {
+   "work": "화단 정비",
+   "typed": 18,
+   "assess_ms": 5.371197000044958,
+   "hwpx_ms": 144.5442039999989,
+   "tbm_ms": 136.379437999949,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "자재 운반",
+   "typed": 20,
+   "assess_ms": 5.1079709999157785,
+   "hwpx_ms": 119.38561299996309,
+   "tbm_ms": 138.43890999999076,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "난간 절단",
+   "typed": 19,
+   "assess_ms": 5.4565149999916684,
+   "hwpx_ms": 106.03996700001517,
+   "tbm_ms": 152.26624700005686,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "하역",
+   "typed": 12,
+   "assess_ms": 5.852608000054715,
+   "hwpx_ms": 140.44011700002557,
+   "tbm_ms": 138.24803900001825,
+   "hazards": 2,
+   "measures": 6,
+   "reasons": 0,
+   "laws": 2
+  },
+  {
+   "work": "콘센트 교체",
+   "typed": 27,
+   "assess_ms": 6.085901999995258,
+   "hwpx_ms": 174.37452400008624,
+   "tbm_ms": 141.27523800004838,
+   "hazards": 2,
+   "measures": 6,
+   "reasons": 1,
+   "laws": 2
+  },
+  {
+   "work": "맨홀 확인",
+   "typed": 19,
+   "assess_ms": 7.627038999999058,
+   "hwpx_ms": 101.37065300000359,
+   "tbm_ms": 135.83901000004062,
+   "hazards": 1,
+   "measures": 5,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "창고 정리",
+   "typed": 15,
+   "assess_ms": 5.756186999974489,
+   "hwpx_ms": 118.56219699996018,
+   "tbm_ms": 140.5616929999951,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "복도 작업",
+   "typed": 23,
+   "assess_ms": 7.621212999993077,
+   "hwpx_ms": 143.9162160000933,
+   "tbm_ms": 216.63781699999163,
+   "hazards": 2,
+   "measures": 7,
+   "reasons": 1,
+   "laws": 2
+  },
+  {
+   "work": "배선 정리",
+   "typed": 13,
+   "assess_ms": 6.3174809999964054,
+   "hwpx_ms": 113.1258620000608,
+   "tbm_ms": 167.99641899990547,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "옥상 방수",
+   "typed": 17,
+   "assess_ms": 6.545953999989251,
+   "hwpx_ms": 139.53496599992832,
+   "tbm_ms": 145.37565199998426,
+   "hazards": 2,
+   "measures": 8,
+   "reasons": 0,
+   "laws": 2
+  },
+  {
+   "work": "소독제",
+   "typed": 9,
+   "assess_ms": 7.0127480000792275,
+   "hwpx_ms": 111.77377499996055,
+   "tbm_ms": 144.1862570000012,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "송풍기",
+   "typed": 9,
+   "assess_ms": 6.244146999961231,
+   "hwpx_ms": 106.8548279999959,
+   "tbm_ms": 133.6603050000349,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "물탱크",
+   "typed": 9,
+   "assess_ms": 6.890599999906044,
+   "hwpx_ms": 113.64028499997403,
+   "tbm_ms": 134.5873999999867,
+   "hazards": 1,
+   "measures": 5,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "잔디 깎기",
+   "typed": 27,
+   "assess_ms": 6.777955999950791,
+   "hwpx_ms": 101.82146500005729,
+   "tbm_ms": 165.39177200002086,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 1,
+   "laws": 1
+  },
+  {
+   "work": "홈통 청소",
+   "typed": 13,
+   "assess_ms": 6.6973890000099345,
+   "hwpx_ms": 101.81160700005876,
+   "tbm_ms": 134.93191999998544,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "차량 유도",
+   "typed": 15,
+   "assess_ms": 6.811066000068422,
+   "hwpx_ms": 101.17403999993257,
+   "tbm_ms": 130.35246699996605,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "보일러 점검",
+   "typed": 19,
+   "assess_ms": 7.0298399999728645,
+   "hwpx_ms": 90.67862000006244,
+   "tbm_ms": 128.75672000006944,
+   "hazards": 0,
+   "measures": 0,
+   "reasons": 0,
+   "laws": 0
+  },
+  {
+   "work": "외벽 도장",
+   "typed": 20,
+   "assess_ms": 6.419032000053448,
+   "hwpx_ms": 116.13668400002553,
+   "tbm_ms": 128.7821089999852,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 1,
+   "laws": 1
+  },
+  {
+   "work": "조명 교체",
+   "typed": 19,
+   "assess_ms": 8.351521999998113,
+   "hwpx_ms": 98.226770999986,
+   "tbm_ms": 140.69030200005272,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "수처리",
+   "typed": 10,
+   "assess_ms": 9.639427999900363,
+   "hwpx_ms": 102.33255699995425,
+   "tbm_ms": 178.74839000000975,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "집수정 청소",
+   "typed": 15,
+   "assess_ms": 7.6698880000094505,
+   "hwpx_ms": 159.22360900003696,
+   "tbm_ms": 137.06447699996716,
+   "hazards": 2,
+   "measures": 8,
+   "reasons": 0,
+   "laws": 2
+  },
+  {
+   "work": "제설",
+   "typed": 8,
+   "assess_ms": 7.239522000077159,
+   "hwpx_ms": 105.30097299999852,
+   "tbm_ms": 145.4084789999115,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "무대 조명",
+   "typed": 29,
+   "assess_ms": 7.778677000032985,
+   "hwpx_ms": 86.50635699996201,
+   "tbm_ms": 138.46401299997524,
+   "hazards": 0,
+   "measures": 0,
+   "reasons": 0,
+   "laws": 0
+  },
+  {
+   "work": "바닥 왁스",
+   "typed": 17,
+   "assess_ms": 8.561564000046928,
+   "hwpx_ms": 102.72941100004118,
+   "tbm_ms": 159.6011090000502,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "간판 점검",
+   "typed": 20,
+   "assess_ms": 7.916852999983348,
+   "hwpx_ms": 101.65451700004269,
+   "tbm_ms": 131.01095399997575,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "펜스 수리",
+   "typed": 19,
+   "assess_ms": 10.625889000039024,
+   "hwpx_ms": 125.05811400001221,
+   "tbm_ms": 155.4024560000471,
+   "hazards": 2,
+   "measures": 7,
+   "reasons": 0,
+   "laws": 2
+  },
+  {
+   "work": "승강기 점검",
+   "typed": 18,
+   "assess_ms": 12.568140999974275,
+   "hwpx_ms": 107.88614599994162,
+   "tbm_ms": 204.13609799993537,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "차단기 수리",
+   "typed": 24,
+   "assess_ms": 8.575247000067066,
+   "hwpx_ms": 141.0536849999744,
+   "tbm_ms": 142.81019999998534,
+   "hazards": 2,
+   "measures": 6,
+   "reasons": 0,
+   "laws": 2
+  },
+  {
+   "work": "청소",
+   "typed": 14,
+   "assess_ms": 8.838389999937135,
+   "hwpx_ms": 111.81576199999199,
+   "tbm_ms": 151.64092299994536,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "배수",
+   "typed": 13,
+   "assess_ms": 9.182097999996586,
+   "hwpx_ms": 119.63974599996163,
+   "tbm_ms": 156.15790699996523,
+   "hazards": 1,
+   "measures": 5,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "의자 정리",
+   "typed": 16,
+   "assess_ms": 9.284535000006144,
+   "hwpx_ms": 131.94717099997888,
+   "tbm_ms": 150.32605800001875,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "풀사이드 보수",
+   "typed": 26,
+   "assess_ms": 9.225815000036164,
+   "hwpx_ms": 151.66030600005342,
+   "tbm_ms": 147.95097000001078,
+   "hazards": 2,
+   "measures": 6,
+   "reasons": 1,
+   "laws": 2
+  },
+  {
+   "work": "케이블",
+   "typed": 9,
+   "assess_ms": 9.42374600003859,
+   "hwpx_ms": 107.91010500008724,
+   "tbm_ms": 138.88426400001208,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "천장 보수",
+   "typed": 13,
+   "assess_ms": 9.389256999952522,
+   "hwpx_ms": 140.88630300000204,
+   "tbm_ms": 156.85142300003463,
+   "hazards": 2,
+   "measures": 7,
+   "reasons": 0,
+   "laws": 2
+  },
+  {
+   "work": "배관 절단",
+   "typed": 21,
+   "assess_ms": 10.110110000027817,
+   "hwpx_ms": 105.91952999993737,
+   "tbm_ms": 139.7592740000846,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "여과기",
+   "typed": 10,
+   "assess_ms": 8.612362000008034,
+   "hwpx_ms": 104.78004599997348,
+   "tbm_ms": 150.39226099997904,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "정산기 점검",
+   "typed": 22,
+   "assess_ms": 11.372107999932268,
+   "hwpx_ms": 117.84368500002529,
+   "tbm_ms": 151.1932240000533,
+   "hazards": 2,
+   "measures": 7,
+   "reasons": 0,
+   "laws": 2
+  },
+  {
+   "work": "태양광",
+   "typed": 15,
+   "assess_ms": 10.993010999982289,
+   "hwpx_ms": 109.4410150000158,
+   "tbm_ms": 134.07959400001346,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "탱크 도장",
+   "typed": 13,
+   "assess_ms": 9.464424000043437,
+   "hwpx_ms": 112.61838299992633,
+   "tbm_ms": 135.7268120000299,
+   "hazards": 1,
+   "measures": 5,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "열화상",
+   "typed": 13,
+   "assess_ms": 9.737300999972831,
+   "hwpx_ms": 105.1067639999701,
+   "tbm_ms": 133.77625099997204,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "적재",
+   "typed": 7,
+   "assess_ms": 9.392275999971389,
+   "hwpx_ms": 117.3218829999314,
+   "tbm_ms": 138.86503200001243,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "펌프 점검",
+   "typed": 25,
+   "assess_ms": 10.253712999997333,
+   "hwpx_ms": 119.05833800005894,
+   "tbm_ms": 130.28002900000502,
+   "hazards": 2,
+   "measures": 6,
+   "reasons": 0,
+   "laws": 2
+  },
+  {
+   "work": "로비 청소",
+   "typed": 20,
+   "assess_ms": 13.775105000036092,
+   "hwpx_ms": 102.0207600000731,
+   "tbm_ms": 135.5210919999763,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "현수막",
+   "typed": 14,
+   "assess_ms": 10.267981000083637,
+   "hwpx_ms": 123.0724959999634,
+   "tbm_ms": 200.93860899999072,
+   "hazards": 1,
+   "measures": 4,
+   "reasons": 0,
+   "laws": 1
+  },
+  {
+   "work": "모터 교체",
+   "typed": 17,
+   "assess_ms": 10.538973000052465,
+   "hwpx_ms": 106.94435599998542,
+   "tbm_ms": 135.2327189999869,
+   "hazards": 1,
+   "measures": 3,
+   "reasons": 1,
+   "laws": 1
+  },
+  {
+   "work": "무대 리프트",
+   "typed": 19,
+   "assess_ms": 9.661880999942696,
+   "hwpx_ms": 85.5646310000111,
+   "tbm_ms": 128.81307599991487,
+   "hazards": 0,
+   "measures": 0,
+   "reasons": 0,
+   "laws": 0
+  }
+ ]
+}
