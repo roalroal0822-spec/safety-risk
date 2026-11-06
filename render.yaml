@@ -30,5 +30,7 @@ services:
       # 공공데이터 키(선택). 값은 Render 화면에서 직접 넣습니다(저장소에 적지 않음). 없으면 예시 자료로 동작합니다.
       - key: DATA_GO_KR_KEY
         sync: false
+      - key: KMA_APIHUB_KEY
+        sync: false
       - key: SAFETYDATA_KEY
         sync: false

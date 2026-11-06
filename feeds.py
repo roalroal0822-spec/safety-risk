@@ -18,6 +18,10 @@ from datetime import datetime, timedelta
 TIMEOUT = 6
 KMA_NCST = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst"
 KMA_WRN = "http://apis.data.go.kr/1360000/WthrWrnInfoService/getWthrWrnList"
+# 기상청 API허브(apihub.kma.go.kr)의 공공데이터포털 형식(typ02) 주소. 키 이름은 authKey
+HUB = os.environ.get("KMA_HUB_TYP02", "https://apihub.kma.go.kr/api/typ02/openApi")
+HUB_NCST = HUB + "/VilageFcstInfoService_2.0/getUltraSrtNcst"
+HUB_WRN = HUB + "/WthrWrnInfoService/getWthrWrnList"  # 특보 목록: API허브 주소 형식은 미확인(실패하면 특보 없이 기온만)
 DSSP_MSG = "https://www.safetydata.go.kr/V2/api/DSSP-IF-00247"
 
 # 기관 위치(환경변수로 바꿈). 격자 nx·ny는 기상청 단기예보 격자, stn은 기상특보 지점 번호.
@@ -81,32 +85,46 @@ def sample_weather():
             "note": "공공데이터포털 키(DATA_GO_KR_KEY)가 없거나 연결되지 않아 예시 자료를 보여 줍니다."}
 
 
+def _hub_key():
+    """기상청 API허브 키. 주소째 넣어도 authKey= 뒤만 쓴다."""
+    k = os.environ.get("KMA_APIHUB_KEY", "").strip()
+    m = re.search(r"authKey=([^&\s]+)", k)
+    return urllib.parse.unquote(m.group(1) if m else k)
+
+
 def weather():
     key = urllib.parse.unquote(os.environ.get("DATA_GO_KR_KEY", "").strip())  # 인코딩 키를 넣어도 디코딩 키로
-    if not key:
+    hub = _hub_key()
+    if not key and not hub:
         return sample_weather()
+    if key:
+        auth, ncst_url, wrn_url, src = {"serviceKey": key}, KMA_NCST, KMA_WRN, "기상청 단기예보·기상특보(공공데이터포털)"
+    else:
+        auth, ncst_url, wrn_url, src = {"authKey": hub}, HUB_NCST, HUB_WRN, "기상청 초단기실황·기상특보(기상청 API허브)"
+    now = datetime.now() - timedelta(minutes=40)  # 초단기실황은 매시 정각 자료가 40분 뒤 나옴
     try:
-        now = datetime.now() - timedelta(minutes=40)  # 초단기실황은 매시 정각 자료가 40분 뒤 나옴
-        d = _get(KMA_NCST, {"serviceKey": key, "pageNo": 1, "numOfRows": 20, "dataType": "JSON",
-                            "base_date": now.strftime("%Y%m%d"), "base_time": now.strftime("%H00"), "nx": NX, "ny": NY})
+        d = _get(ncst_url, dict(auth, pageNo=1, numOfRows=20, dataType="JSON",
+                                base_date=now.strftime("%Y%m%d"), base_time=now.strftime("%H00"), nx=NX, ny=NY))
         obs = {i.get("category"): i.get("obsrValue") for i in _items(d)}
         ta, rh = float(obs["T1H"]), float(obs["REH"])
+    except Exception as e:  # 키 오류·승인 전·연결 실패
+        s = sample_weather()
+        s["note"] = f"기상청 자료를 받지 못해 예시 자료를 보여 줍니다({str(e)[:80]})."
+        return s
+    warns, note = [], ""
+    try:
         today = datetime.now()
-        w = _get(KMA_WRN, {"serviceKey": key, "pageNo": 1, "numOfRows": 20, "dataType": "JSON", "stnId": STN,
-                           "fromTmFc": (today - timedelta(days=1)).strftime("%Y%m%d"), "toTmFc": today.strftime("%Y%m%d")})
-        warns = []
+        w = _get(wrn_url, dict(auth, pageNo=1, numOfRows=20, dataType="JSON", stnId=STN,
+                               fromTmFc=(today - timedelta(days=1)).strftime("%Y%m%d"), toTmFc=today.strftime("%Y%m%d")))
         for i in _items(w):
             t = str(i.get("title") or "")
             k, lv, off = warn_kind(t)
             if k:
                 warns.append({"title": t, "kind": k, "level": lv, "off": off})
-        return {"source": "기상청 단기예보·기상특보(공공데이터포털)", "live": True, "region": REGION,
-                "time": now.strftime("%Y-%m-%d %H:00 관측"), "ta": ta, "rh": rh, "feel": feels_like(ta, rh),
-                "warnings": warns, "note": ""}
-    except Exception as e:  # 키 오류·승인 전·연결 실패
-        s = sample_weather()
-        s["note"] = f"기상청 자료를 받지 못해 예시 자료를 보여 줍니다({str(e)[:80]})."
-        return s
+    except Exception as e:
+        note = f"기상특보는 받지 못했습니다({str(e)[:60]}). 기온·습도·체감온도만 실제 자료입니다."
+    return {"source": src, "live": True, "region": REGION, "time": now.strftime("%Y-%m-%d %H:00 관측"), "ta": ta, "rh": rh,
+            "feel": feels_like(ta, rh), "warnings": warns, "note": note}
 
 
 def active_warnings(wx):
