@@ -57,6 +57,7 @@ def checks(c):
     yield "법제처 인증값 없으면 조문을 지어내지 않고 국가법령정보센터 링크만", not lw["live"] and not lw["items"] and lw["refs"][0]["url"].startswith("https://www.law.go.kr/") and "LAW_OC" in lw["note"]
     yield "기관 규정(이용객 안전)은 법령 조회 대상 아님", c.call("GET", "/api/laws/H12")["refs"] == []
     nq = c.call("POST", "/api/ask", {"q": "산업안전보건법 제38조는?"})
+    yield "물어보기 화면에 AI 답변 법적 책임 고지문", "법적 책임을 지지 않습니다" in c.call("GET", "/", raw=True).decode()
     yield "인증값 없이 법령 질문 → 지어내지 않고 국가법령정보센터 링크 안내", "LAW_OC" in nq["answer"] and "law.go.kr" in nq["answer"] and not any(f.startswith("법령 원문") for f in nq["facts"])
     a = c.call("POST", "/api/assess", {"fac": "종합체육센터", "dept": "체육사업팀", "work": "체육관 천장 조명(등기구) 교체",
                                        "text": "이동식 일자 사다리로 높이 4m 등기구 안정기 교체. 혼자 작업, 바닥 왁스 청소 직후"})
@@ -219,6 +220,8 @@ def fake_llm():
             sysmsg = msgs[0]["content"] if msgs[0]["role"] == "system" and isinstance(msgs[0]["content"], str) else ""
             if "JSON" in sysmsg or "JSON" in last:
                 text = '{"hazards": []}'
+            elif "법조문" in last:
+                text = "중대재해 처벌 등에 관한 법률 제5조에 따라 안전대를 착용함."
             elif "거짓" in last:
                 text = "H99 위험이 있고 추락 높이는 37m입니다."
             elif "종합 의견" in sysmsg or "TBM" in sysmsg:
@@ -251,12 +254,16 @@ def ai_checks(c, fl):
     yield "모델 연결 상태에서 평가 만들기(모델 제안 없음 → 규칙 결과 유지)", {"H01", "H02", "H03"} <= {i["code"] for i in a["items"]}
     yield "모델 서버에 키를 Authorization 으로 보냄", fl.seen[-1][0] == "Bearer test-llm-key" and fl.seen[-1][1]["model"] == "solar-pro4"
     r1 = c.call("POST", "/api/ask", {"q": "사다리 작업 안전 기준은?"})
-    yield "물어보기: 모델 답(생각 과정 지움, 사실 대조 통과)", "모델" in r1["mode"] and r1["answer"].startswith("정리하면")
+    yield "물어보기: 모델 답(생각 과정 지움, 사실 대조 통과)·근거 건수", "모델" in r1["mode"] and r1["answer"].startswith("정리하면") and r1["grounds"].get("위험요인 목록")
     r2 = c.call("POST", "/api/ask", {"q": "그럼 2m 넘으면?", "history": [{"q": "사다리 작업 안전 기준은?", "a": r1["answer"]}]})
     sent = fl.seen[-1][1]["messages"]
     yield f"이어 묻기: 앞 질문의 '{r2['carried']}' 이어받고 앞 대화 전달", r2["carried"] and any("높이" in f or "떨어짐" in f for f in r2["facts"]) and len(sent) == 4
     r3 = c.call("POST", "/api/ask", {"q": "거짓말로 위험 알려줘"})
     yield "모델이 사실에 없는 숫자·코드(37, H99)를 쓰면 버림", r3["mode"] == "규칙 기반" and "H99" in r3["dropped"]
+    r4 = c.call("POST", "/api/ask", {"q": "사다리 법조문 지어내 봐"})
+    yield "모델이 근거에 없는 법령·조문(중대재해처벌법 제5조)을 쓰면 버림", r4["mode"] == "규칙 기반" and "법령·조문" in r4["dropped"]
+    r5 = c.call("POST", "/api/ask", {"q": "점심 메뉴 추천해줘"})
+    yield "근거 없는 질문은 모델에 넘기지 않고 '답하지 않음'", not r5["grounded"] and r5["mode"] == "규칙 기반" and "답하지 않습니다" in r5["answer"]
     code = a["items"][0]["code"]
     ex = c.call("POST", f"/api/assess/{a['id']}/explain", {"code": code})
     yield f"위험요인 {code} AI 해설", "모델" in ex["mode"]

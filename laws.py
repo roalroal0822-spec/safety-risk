@@ -123,7 +123,7 @@ def fetch(name):
             if str(u.get("조문여부", "조문")) != "조문":
                 continue
             no = f"제{u['조문번호']}조" + (f"의{u['조문가지번호']}" if str(u.get("조문가지번호") or "").strip() not in ("", "0") else "")
-            text = _article_text(u)
+            text = re.sub(r"^제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:\([^)]*\))?\s*", "", _article_text(u)).strip()
             if text:
                 arts.append({"no": no, "title": str(u.get("조문제목") or "").strip(), "text": text,
                              "date": str(u.get("조문시행일자") or "")})

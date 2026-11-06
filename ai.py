@@ -15,6 +15,7 @@ from core.llm import LLMError
 
 RX_NUM = re.compile(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?")
 RX_CODE = re.compile(r"\bH\d{2}\b")
+RX_ART = re.compile(r"제\s*(\d+)\s*조(?:\s*의\s*(\d+))?")
 RATE, RATE_MAX = deque(), 40  # 1분에 40번(공개 시연판에서 키가 빨리 닳지 않게)
 
 
@@ -59,6 +60,15 @@ def guard(llm, system, facts, rule, user=None, extra="", history=None, max_token
     if bad or codes:
         what = [f"{x:g}" for x in bad[:3]] + codes[:3]
         res["dropped"] = f"모델 문장에 사실에 없는 숫자·코드({', '.join(what)})가 있어 규칙 문장을 씁니다"
+        return res
+    # 조문 번호·법령 이름도 근거에 있는 것만(기억 속 법령 내용으로 지어내는 것을 막음)
+    zsrc = re.sub(r"\s+", "", src)
+    arts = sorted({f"제{m[0]}조" + (f"의{m[1]}" if m[1] else "") for m in RX_ART.findall(text)}
+                  - {f"제{m[0]}조" + (f"의{m[1]}" if m[1] else "") for m in RX_ART.findall(src)})
+    names = [nm for nm in laws.KNOWN + list(laws.ALIAS) if nm.replace(" ", "") in re.sub(r"\s+", "", text) and nm.replace(" ", "") not in zsrc
+             and not (nm in laws.ALIAS and laws.ALIAS[nm].replace(" ", "") in zsrc)]
+    if arts or names:
+        res["dropped"] = f"모델 문장에 근거에 없는 법령·조문({', '.join((arts + names)[:3])})이 있어 규칙 문장을 씁니다"
         return res
     res.update(text=text, mode="모델(사실 대조 통과)")
     return res
@@ -156,6 +166,7 @@ def ask_facts(k, q, items, today):
         if items:
             lines.append("평가 현황: " + "; ".join(f"{a['fac']} {a['work']} {'시작 가능' if assess.stats(a)['ready'] else '작업 전 조치 필요'}" for a in items[:4]) + ".")
     if not lines:
+        lines.append("제공된 근거(기관 안전보건관리규정·위험요인 목록·아차사고 기록·법령 원문)에서 이 질문에 해당하는 내용을 찾지 못해 답하지 않습니다. 근거 없이 추측한 답은 틀릴 수 있기 때문입니다.")
         lines.append('이렇게 물어보세요: "사다리 작업 안전 기준은?", "폭염 때 실외 작업은?", "밀폐공간 들어가기 전에 뭘 해야 해?", "오늘 시작 못 하는 작업 있어?"')
     return facts, srcs, "\n".join(lines)
 
@@ -171,13 +182,16 @@ def ask(k, q, items, llm=None, history=None):
     history = [h for h in (history or []) if h.get("q") and h.get("a")][-4:]
     q2, carried = carry(k, q, history)
     facts, srcs, rule = ask_facts(k, q2, items, date.today().isoformat())
-    general = False
-    if not facts and llm and llm.enabled:
-        facts, general = overview_facts(k, items), True
+    general = False   # 근거 없는 질문은 모델에 넘기지 않는다(추측 답 방지)
     g = guard(llm, "당신은 공공시설 현장 안전 담당자를 돕습니다. 질문에 한국어로 3~5문장으로 답하세요. 기관 규정과 위험요인 목록의 감소대책을 근거로 말하고, "
-                   "법령은 사실 목록의 '법령 원문' 조문만 번호와 함께 인용하고, 원문이 없으면 이름과 주제까지만 쓰세요." + (" 사실만으로 답할 수 없으면 그렇다고 말하세요." if general else ""),
+                   "법령은 사실 목록의 '법령 원문' 조문만 번호와 함께 인용하고, 원문이 없으면 이름과 주제까지만 쓰세요. "
+                   "일반 상식이나 기억하고 있는 법령 내용으로 보태지 말고, 사실 목록으로 답할 수 없는 부분은 '제공된 근거에서 확인되지 않습니다'라고 분명히 쓰세요. "
+                   "답 끝에 근거로 쓴 법령 조문·규정 조문을 괄호로 밝히세요.",
               facts, rule, user=f"질문: {q2}", extra=q, history=history)
+    grounds = {"법령 원문": sum(f.startswith("법령 원문") for f in facts), "기관 규정": sum(bool(re.match(r"\S+ 제\d+조", f)) or f.startswith("판단 기준") for f in facts),
+               "위험요인 목록": sum(bool(re.match(r"H\d{2} ", f)) for f in facts), "아차사고": sum(f.startswith("아차사고") for f in facts)}
     return {"answer": g["text"], "mode": g["mode"], "dropped": g["dropped"].replace("규칙 문장", "규칙 답"), "facts": facts,
+            "grounds": {k_: v for k_, v in grounds.items() if v}, "grounded": bool(facts),
             "sources": [s for s in srcs if s][:6], "carried": carried, "general": general}
 
 

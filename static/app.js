@@ -273,6 +273,8 @@ function askTurn(t) {
   return el("div", { class: "panel chat-turn" },
     el("div", { class: "row" }, el("div", { class: "chat-q", style: { flex: 1 } }, t.q), el("span", { class: "tag " + (/모델/.test(r.mode) ? "ok" : "gray") }, r.mode)),
     r.carried ? el("p", { class: "small muted" }, `앞 질문의 '${r.carried}'를 이어서 봤습니다.`) : null,
+    el("div", { class: "small", style: { marginTop: "6px", color: r.grounded ? "var(--muted)" : "var(--warn)" } },
+      r.grounded ? "근거 확인: " + Object.entries(r.grounds || {}).map(([k, v]) => `${k} ${v}건`).join(" · ") : "근거를 찾지 못해 추측으로 답하지 않았습니다."),
     el("div", { class: "ans", style: { marginTop: "8px", whiteSpace: "pre-line" } }, r.answer),
     r.general && /모델/.test(r.mode) ? el("p", { class: "small muted" }, "※ 질문에 딱 맞는 조문·위험요인이 없어 기관 위험요인 목록 전체로 답했습니다.") : null,
     r.dropped ? el("p", { class: "small", style: { color: "var(--warn)" } }, "※ " + r.dropped) : null,
