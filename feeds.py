@@ -82,7 +82,7 @@ def sample_weather():
 
 
 def weather():
-    key = os.environ.get("DATA_GO_KR_KEY", "").strip()
+    key = urllib.parse.unquote(os.environ.get("DATA_GO_KR_KEY", "").strip())  # 인코딩 키를 넣어도 디코딩 키로
     if not key:
         return sample_weather()
     try:
@@ -148,7 +148,7 @@ def msg_kind(text, given=""):
 
 
 def messages():
-    key = os.environ.get("SAFETYDATA_KEY", "").strip()
+    key = urllib.parse.unquote(os.environ.get("SAFETYDATA_KEY", "").strip())
     if not key:
         return sample_messages()
     try:
