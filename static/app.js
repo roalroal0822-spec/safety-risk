@@ -566,3 +566,6 @@ async function toggleLaw(btn, code) {
   } catch (e) { toast(e.message, true); }
   btn.disabled = false;
 }
+
+// 첫 화면 사진(static/img/hero.jpg)이 있으면 사진 배경으로
+(() => { const im = new Image(); im.onload = () => { const v = document.querySelector(".kh-visual"); if (v) { v.style.setProperty("--hero-photo", "url(/img/hero.jpg)"); v.classList.add("has-photo"); } }; im.src = "/img/hero.jpg"; })();

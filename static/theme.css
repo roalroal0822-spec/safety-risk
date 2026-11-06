@@ -330,3 +330,10 @@ header.top.hero.kh h1 { font-size: 56px; }
 .kh-cones .worker { width: 66px; height: 148px; right: 214px; }
 .kh-cones .c-small { width: 120px; height: 120px; right: 278px; }
 @media (max-width: 1100px) { .kh-cones { width: 220px; height: 180px; opacity: .5; } .kh-cones .c-big { width: 140px; height: 140px; right: 10px; } .kh-cones .worker { width: 40px; height: 90px; right: 120px; } .kh-cones .c-small { width: 70px; height: 70px; right: 160px; } }
+/* 첫 화면 사진: static/img/hero.jpg 가 있으면 사진 배경(왼쪽은 남색으로 덮어 글을 읽기 쉽게), 그림은 숨김 */
+.kh-visual.has-photo { background:
+    linear-gradient(90deg, rgba(5, 20, 47, .94) 0%, rgba(5, 20, 47, .78) 38%, rgba(5, 20, 47, .25) 70%, rgba(5, 20, 47, .05) 100%),
+    var(--hero-photo) center right / cover no-repeat, var(--hero-a); }
+.kh-visual.has-photo::after { display: none; }
+.kh-visual.has-photo .kh-cones { display: none; }
+.kh-cones .c-small { right: 230px; }
