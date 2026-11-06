@@ -252,7 +252,7 @@ async function renderBrief() {
   const chip = (on, name) => el("span", { class: "tag " + (on ? "ok" : "gray") }, name + (on ? " 실시간" : " 예시 자료"));
   const w = r.weather;
   box.replaceChildren(el("div", { class: "panel" },
-    el("div", { class: "row" }, el("h2", { style: { flex: 1, margin: 0 } }, "오늘 작업 브리핑"), btn),
+    el("div", { class: "row" }, el("div", { style: { flex: 1 } }, el("h2", { style: { margin: 0 } }, "오늘 작업 브리핑"), el("p", { class: "tagline", style: { margin: "2px 0 0" } }, "재난 앞에서도 안전하게, 언제나 무사히")), btn),
     el("p", { class: "small muted" }, `기상청 체감온도·기상특보, 긴급재난문자, 같은 작업의 아차사고, 끝나지 않은 작업 전 조치를 평가마다 엮어 오늘 멈출 작업과 조심할 작업을 고릅니다. 판정은 규칙(특보 작업 중지, 체감온도 ${r.th.heat_rest}℃·${r.th.heat_stop}℃ 기준)으로 하고, AI는 그 결과로 우선순위를 씁니다.`),
     el("div", { class: "row", style: { gap: "6px", flexWrap: "wrap" } }, chip(r.src.weather, "기상청"), chip(r.src.messages, "재난문자"),
       el("span", { class: "tag info" }, `아차사고 ${r.src.incidents}건`),

@@ -359,3 +359,5 @@ header.top.hero .kh-visual > .kh-photo { background: none; }
 .kh-photo .p2 { background-image: url(/img/hero-side-2.jpg); background-position: 62% 90%; opacity: 0; animation: khswap 14s ease-in-out infinite; }
 @keyframes khswap { 0%, 40% { opacity: 0; } 50%, 90% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .kh-photo .p2 { animation: none; } }
+.tagline { color: var(--gold); font-weight: 700; font-size: 14px; letter-spacing: -.01em; margin: -2px 0 10px; }
+.foot .foot-tag { display: inline-block; color: #f1d48b; font-size: 15px; font-weight: 700; margin-bottom: 6px; }
