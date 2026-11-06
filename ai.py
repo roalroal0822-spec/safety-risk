@@ -78,6 +78,7 @@ def guard(llm, system, facts, rule, user=None, extra="", history=None, max_token
 
 STOP = {"작업", "어떻게", "무엇", "뭐야", "알려줘", "해야", "하나", "있어", "필요", "기준", "규정", "그럼", "그러면", "어때", "언제", "얼마"}
 RX_FOLLOW = re.compile(r"^\s*(그럼|그러면|그리고|그건|그거|거기|그때|그 작업|만약|혹시)")
+RX_ELLIPSIS = re.compile(r"(면|때는?|경우는?|[은는]|이라면|라면|얼마야|얼마예요|어때|어때요)\s*\??\s*$")   # "2m 넘으면?", "야간은?"처럼 말이 끊긴 짧은 질문
 
 
 def _words(q):
@@ -100,7 +101,7 @@ def _articles(k, q, n=2):
 
 def carry(k, q, history):
     """이어 묻는 질문이면 앞 질문의 위험요인 낱말을 붙인다. (질문, 붙인 말)"""
-    if not history or not (RX_FOLLOW.search(q) or len(q.replace(" ", "")) <= 10):
+    if not history or not (RX_FOLLOW.search(q) or (len(q.replace(" ", "")) <= 10 and RX_ELLIPSIS.search(q))):
         return q, ""
     if k.codes_in(q):
         return q, ""
