@@ -56,6 +56,8 @@ def checks(c):
     lw = c.call("GET", "/api/laws/H01")
     yield "법제처 인증값 없으면 조문을 지어내지 않고 국가법령정보센터 링크만", not lw["live"] and not lw["items"] and lw["refs"][0]["url"].startswith("https://www.law.go.kr/") and "LAW_OC" in lw["note"]
     yield "기관 규정(이용객 안전)은 법령 조회 대상 아님", c.call("GET", "/api/laws/H12")["refs"] == []
+    nq = c.call("POST", "/api/ask", {"q": "산업안전보건법 제38조는?"})
+    yield "인증값 없이 법령 질문 → 지어내지 않고 국가법령정보센터 링크 안내", "LAW_OC" in nq["answer"] and "law.go.kr" in nq["answer"] and not any(f.startswith("법령 원문") for f in nq["facts"])
     a = c.call("POST", "/api/assess", {"fac": "종합체육센터", "dept": "체육사업팀", "work": "체육관 천장 조명(등기구) 교체",
                                        "text": "이동식 일자 사다리로 높이 4m 등기구 안정기 교체. 혼자 작업, 바닥 왁스 청소 직후"})
     codes = [i["code"] for i in a["items"]]
@@ -193,6 +195,12 @@ def law_checks(c, fs):
     a = c.call("POST", "/api/assess", {"fac": "종합체육센터", "dept": "체육사업팀", "work": "등기구 교체", "text": "사다리로 높이 3m 등기구 교체"})
     pv = json.dumps(c.call("GET", f"/api/assess/{a['id']}/preview"), ensure_ascii=False)
     yield "평가표에 관련 법령 조문(제42조) 표·절", "제42조" in pv and "관련 법령 조문" in pv
+    q1 = c.call("POST", "/api/ask", {"q": "산업안전보건법 제114조는?"})
+    yield "물어보기 법령 질문 → 법제처에서 산업안전보건법 제114조 원문", q1["facts"][0].startswith("법령 원문 산업안전보건법 제114조") and "제114조" in q1["answer"] and "시험용" in q1["answer"]
+    q2 = c.call("POST", "/api/ask", {"q": "안전보건규칙 42조 알려줘"})
+    yield "약칭(안전보건규칙)·'42조'도 알아들음", q2["facts"][0].startswith("법령 원문 산업안전보건기준에 관한 규칙 제42조")
+    q3 = c.call("POST", "/api/ask", {"q": "감전 관련 법령은?"})
+    yield "법령명 없는 법령 질문 → 기본 법령에서 낱말로 조문 찾기", any("감전" in f and f.startswith("법령 원문") for f in q3["facts"])
 
 
 def fake_llm():

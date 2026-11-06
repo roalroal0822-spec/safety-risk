@@ -111,7 +111,9 @@ def fetch(name):
     try:
         s = _get("lawSearch.do", {"query": name, "display": 20})
         cands = list(_dicts(s, "법령일련번호"))
-        pick = next((c for c in cands if str(c.get("법령명한글", "")).replace(" ", "") == name.replace(" ", "")), None)
+        key = name.replace(" ", "")
+        pick = next((c for c in cands if str(c.get("법령명한글", "")).replace(" ", "") == key), None) \
+            or next((c for c in cands if str(c.get("법령약칭명", "")).replace(" ", "") == key), None)
         if not pick:
             raise RuntimeError(f"'{name}'을(를) 법령 목록에서 찾지 못함")
         b = _get("lawService.do", {"MST": pick["법령일련번호"]})
@@ -172,6 +174,71 @@ def articles_for(law_text, n=2):
         out["note"] = "법령 원문을 받지 못했습니다(" + "; ".join(errs)[:160] + ")."
     elif out["live"] and not out["items"]:
         out["note"] = "법령은 받았지만 주제에 맞는 조문을 찾지 못했습니다. 링크에서 확인하세요."
+    return out
+
+
+# 물어보기: 질문에 법령 이름·조문 번호가 있으면 법제처에서 그 조문을 받는다.
+ALIAS = {"중대재해처벌법": "중대재해 처벌 등에 관한 법률", "중대재해법": "중대재해 처벌 등에 관한 법률",
+         "재난안전법": "재난 및 안전관리 기본법", "재난안전관리기본법": "재난 및 안전관리 기본법",
+         "시설물안전법": "시설물의 안전 및 유지관리에 관한 특별법", "산안법": "산업안전보건법",
+         "안전보건규칙": "산업안전보건기준에 관한 규칙", "산업안전보건규칙": "산업안전보건기준에 관한 규칙",
+         "산업안전보건기준규칙": "산업안전보건기준에 관한 규칙"}
+KNOWN = ["산업안전보건기준에 관한 규칙", "산업안전보건법 시행규칙", "산업안전보건법 시행령", "산업안전보건법",
+         "중대재해 처벌 등에 관한 법률 시행령", "중대재해 처벌 등에 관한 법률", "재난 및 안전관리 기본법",
+         "시설물의 안전 및 유지관리에 관한 특별법"]
+RX_LAWQ = re.compile(r"법|법령|조문|규칙|시행령|조항|제\s*\d+\s*조|\d+\s*조")
+DEFAULT = ["산업안전보건기준에 관한 규칙", "산업안전보건법"]
+
+
+def laws_in(q):
+    """질문에 나온 법령 이름(정식 이름). 긴 이름부터 맞춰 겹치지 않게."""
+    z = re.sub(r"\s+", "", q)
+    out = []
+    for nm in KNOWN:
+        if nm.replace(" ", "") in z and not any(nm.replace(" ", "") in o.replace(" ", "") for o in out):
+            out.append(nm)
+    for al, nm in ALIAS.items():
+        if al in z and nm not in out:
+            out.append(nm)
+    return out
+
+
+def ask_articles(q, words, n=3):
+    """법령 질문이면 조문을 받는다. 법령명이 없으면 산업안전보건 기본 두 법령에서 질문 낱말로 찾는다.
+    {"asked": 법령 질문인지, "live", "items", "refs", "note"}"""
+    named = laws_in(q)
+    out = {"asked": bool(named or RX_LAWQ.search(re.sub(r"(방|해|용|수|기|문|작|요)법", "", q))), "live": False, "source": SRC, "items": [], "refs": [], "note": ""}
+    if not out["asked"]:
+        return out
+    names = named or DEFAULT
+    out["refs"] = [{"law": nm, "url": link(nm)} for nm in names]
+    m = re.search(r"제?\s*(\d+)\s*조(?:\s*의\s*(\d+))?", q)
+    want = (f"제{m.group(1)}조" + (f"의{m.group(2)}" if m.group(2) else "")) if m else ""
+    if not oc():
+        out["note"] = "법제처 인증값(LAW_OC)이 없어 법령 원문을 가져오지 못했습니다. 국가법령정보센터 링크에서 확인하세요."
+        return out
+    ws = [w for w in words if not any(w in nm.replace(" ", "") for nm in names) and not re.match(r"^(법령|법률|조문|규칙|시행령|조항|내용|기준|뭐야|알려줘)$", w)]
+    errs = []
+    for nm in names:
+        try:
+            law = fetch(nm)
+        except RuntimeError as e:
+            errs.append(f"{nm}: {e}")
+            continue
+        out["live"] = True
+        if want and named:
+            picks = [a for a in law["articles"] if a["no"] == want][:1]
+        else:
+            sc = sorted(((sum(3 * (w in a["title"]) + (w in a["text"]) for w in ws), a) for a in law["articles"]), key=lambda x: -x[0])
+            picks = [a for s_, a in sc if s_][:n]
+        for a in picks:
+            out["items"].append({"law": law["name"], "no": a["no"], "title": a["title"], "text": a["text"][:1200],
+                                 "date": _ymd(a["date"]) or _ymd(law["date"]), "url": link(law["name"], a["no"])})
+    out["items"] = out["items"][:n]
+    if errs:
+        out["note"] = "법령 원문을 받지 못했습니다(" + "; ".join(errs)[:160] + ")."
+    elif out["live"] and not out["items"]:
+        out["note"] = (f"{want}을(를) 찾지 못했습니다." if want and named else "질문에 맞는 조문을 찾지 못했습니다.") + " 링크에서 확인하세요."
     return out
 
 

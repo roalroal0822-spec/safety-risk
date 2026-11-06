@@ -102,6 +102,10 @@ def carry(k, q, history):
     return q, ""
 
 
+def la_named(q):
+    return bool(laws.laws_in(q))
+
+
 def ask_facts(k, q, items, today):
     """질문에 맞는 사실 목록·출처·규칙 답."""
     facts, srcs, lines = [], [], []
@@ -113,10 +117,20 @@ def ask_facts(k, q, items, today):
         srcs.append(h["src"])
         lines.append(f"{h['name']}({h['type']}) 위험은 이렇게 줄입니다: " + "; ".join(h["measures"][:4]) + "."
                      + (f" 관련 기준: {h['law']}." if h["law"] else ""))
-        for x in laws.articles_for(h["law"], 1)["items"]:
+        for x in ([] if la_named(q) else laws.articles_for(h["law"], 1)["items"]):
             facts.append(f"법령 원문 {laws.cite(x)}" + (f"(시행 {x['date']})" if x["date"] else "") + f": {x['text'][:500]}")
             srcs.append({"file": laws.SRC, "loc": laws.cite(x), "quote": x["text"][:160]})
             lines.append(f"법령 원문 {laws.cite(x)}: {x['text'][:200]}")
+    la = laws.ask_articles(q, _words(q))
+    if la["asked"]:
+        for x in la["items"]:
+            facts.insert(0, f"법령 원문 {laws.cite(x)}" + (f"(시행 {x['date']})" if x["date"] else "") + f": {x['text'][:700]}")
+            srcs.insert(0, {"file": laws.SRC, "loc": laws.cite(x), "quote": x["text"][:160]})
+        if la["items"]:
+            lines.insert(0, "\n".join(f"{laws.cite(x)}" + (f"(시행 {x['date']})" if x["date"] else "") + f": {x['text'][:400]}" for x in la["items"])
+                         + f"\n(출처: {laws.SRC})")
+        else:
+            lines.insert(0, la["note"] + " " + ", ".join(f"{r['law']} {r['url']}" for r in la["refs"]))
     for key, b in k.basis.items():
         if any(w in b["label"] for w in _words(q)) or (key == "height" and re.search(r"높|사다리|m\b|미터", q)) \
                 or (key.startswith("heat") and re.search(r"폭염|더위|체감", q)):
@@ -161,7 +175,7 @@ def ask(k, q, items, llm=None, history=None):
     if not facts and llm and llm.enabled:
         facts, general = overview_facts(k, items), True
     g = guard(llm, "당신은 공공시설 현장 안전 담당자를 돕습니다. 질문에 한국어로 3~5문장으로 답하세요. 기관 규정과 위험요인 목록의 감소대책을 근거로 말하고, "
-                   "법령은 이름과 주제까지만 쓰세요." + (" 사실만으로 답할 수 없으면 그렇다고 말하세요." if general else ""),
+                   "법령은 사실 목록의 '법령 원문' 조문만 번호와 함께 인용하고, 원문이 없으면 이름과 주제까지만 쓰세요." + (" 사실만으로 답할 수 없으면 그렇다고 말하세요." if general else ""),
               facts, rule, user=f"질문: {q2}", extra=q, history=history)
     return {"answer": g["text"], "mode": g["mode"], "dropped": g["dropped"].replace("규칙 문장", "규칙 답"), "facts": facts,
             "sources": [s for s in srcs if s][:6], "carried": carried, "general": general}
