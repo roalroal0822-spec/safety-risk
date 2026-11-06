@@ -24,6 +24,8 @@ function renderDash() {
       el("div", { class: "stat warn" }, el("b", {}, d.overdue.length), el("span", { class: "lbl" }, "기한 지난 조치")),
       el("div", { class: "stat warn" }, el("b", {}, d.reassess.length), el("span", { class: "lbl" }, "수시평가 필요"))),
     el("p", { class: "small muted", style: { marginTop: "10px" } }, `기관 자료: 위험요인 ${S.kb.hazards}종 · 평가 대상 작업 ${S.kb.tasks}개 · 아차사고 ${S.kb.incidents}건 · 규정 ${S.kb.reg || "없음"}`)));
+  box.append(el("div", { id: "brief" }));
+  renderBrief();
   box.append(el("div", { class: "panel", id: "msgs" }, el("div", { class: "row" }, el("h3", { style: { flex: 1, margin: 0 } }, "오늘의 긴급재난문자"),
       el("button", { class: "small", id: "msgs-btn", onclick: e => renderMsgs(e.currentTarget) }, MSGS ? "다시 확인" : "재난문자 확인")),
     el("p", { class: "small muted" }, "우리 지역에 온 재난문자(폭염·강풍·호우 등)와 겹치는 위험요인이 있는 평가를 찾아, 수시평가 필요로 표시하고 작업 전 회의(TBM)에 넣습니다."),
@@ -174,10 +176,12 @@ function renderDetail() {
     a.photos.length ? el("div", { class: "photos", style: { marginTop: "10px" } }, a.photos.map(p => el("img", { src: `/api/photo/${p}`, alt: "현장 사진" }))) : null,
     el("div", { class: "row", style: { marginTop: "14px" } },
       el("span", { class: "small muted" }, "위험성평가표:"), exportButtons(`/api/assess/${a.id}/export`),
+      el("button", { class: "primary", onclick: () => openSheetEditor(true) }, "미리보기·고쳐서 내려받기"),
       el("button", { onclick: () => download(`/api/assess/${a.id}/xlsx`, {}) }, "엑셀"),
       el("button", { onclick: showTBM }, "작업 전 회의(TBM)"),
       el("button", { class: a.status === "확정" ? "" : "primary", onclick: () => save({ status: a.status === "확정" ? "작성 중" : "확정" }) }, a.status === "확정" ? "확정 풀기" : "평가 확정"),
-      el("button", { class: "danger small", onclick: async () => { await api("DELETE", `/api/assess/${a.id}`); CUR = null; box.innerHTML = ""; await load(); } }, "삭제"))));
+      el("button", { class: "danger small", onclick: async () => { await api("DELETE", `/api/assess/${a.id}`); CUR = null; box.innerHTML = ""; await load(); } }, "삭제"))),
+    el("div", { id: "rep-edit" }));
 
   for (const it of a.items) {
     const ls = k => el("select", { onchange: e => save({ items: [{ code: it.code, [k]: +e.target.value }] }) }, [1, 2, 3].map(v => el("option", { value: v, selected: it[k] === v }, v)));
@@ -217,10 +221,219 @@ function renderDetail() {
 
 async function showTBM() {
   const r = await api("GET", `/api/assess/${CUR.id}/tbm`);
+  const list = el("ol", { class: "tbm" }, r.lines.map(l => el("li", {}, l)));
+  const mode = el("div", { class: "small muted" }, "규칙 문안");
+  const btn = el("button", { class: "small primary", onclick: async () => {
+    busy(btn, true, "문안 쓰는 중");
+    try { const x = await api("POST", `/api/assess/${CUR.id}/tbm/ai`); list.replaceChildren(...x.lines.map(l => el("li", {}, l))); mode.textContent = x.mode + (x.dropped ? " · " + x.dropped : ""); }
+    finally { busy(btn, false); }
+  } }, S.llm ? "AI로 말하기 쉽게 다시 쓰기" : "규칙 문안(모델 미연결)");
   modal("작업 전 안전점검회의(TBM) 낭독 문안",
-    el("ol", { class: "tbm" }, r.lines.map(l => el("li", {}, l))),
+    el("div", { class: "row" }, btn, mode), list,
     r.basis ? el("p", { class: "small muted" }, "근거: ", basisChip(r.basis)) : null,
     el("div", { class: "row" }, el("span", { class: "small muted" }, "서명 기록지:"), exportButtons(`/api/assess/${CUR.id}/tbm`)));
+}
+
+// ------------------------------------------------------------ 오늘 작업 브리핑(기상청·재난문자·아차사고 종합 해석)
+const BR_LV = { stop: "bad", fix: "bad", care: "warn", go: "ok" };
+async function renderBrief() {
+  const box = $("#brief");
+  if (!box) return;
+  box.replaceChildren(el("div", { class: "panel" }, el("span", { class: "spinner" }), " 날씨·재난문자와 견주는 중"));
+  let r;
+  try { r = await api("GET", "/api/briefing"); } catch (e) { box.replaceChildren(); return; }
+  const txt = el("div", { class: "ans", style: { marginTop: "10px", whiteSpace: "pre-line" } }, r.ai ? r.ai.text : r.rule);
+  const mode = el("div", { class: "small muted" }, r.ai ? r.ai.mode + (r.ai.dropped ? " · " + r.ai.dropped : "") : "규칙 기반");
+  const btn = el("button", { class: "primary", onclick: async () => {
+    busy(btn, true, "브리핑 쓰는 중");
+    try { const x = await api("POST", "/api/briefing/ai"); txt.textContent = x.text; mode.textContent = x.mode + (x.dropped ? " · " + x.dropped : ""); }
+    finally { busy(btn, false); }
+  } }, S.llm ? "AI 브리핑 쓰기" : "브리핑(규칙)");
+  const chip = (on, name) => el("span", { class: "tag " + (on ? "ok" : "gray") }, name + (on ? " 실시간" : " 예시 자료"));
+  const w = r.weather;
+  box.replaceChildren(el("div", { class: "panel" },
+    el("div", { class: "row" }, el("h2", { style: { flex: 1, margin: 0 } }, "오늘 작업 브리핑"), btn),
+    el("p", { class: "small muted" }, `기상청 체감온도·기상특보, 긴급재난문자, 같은 작업의 아차사고, 끝나지 않은 작업 전 조치를 평가마다 엮어 오늘 멈출 작업과 조심할 작업을 고릅니다. 판정은 규칙(특보 작업 중지, 체감온도 ${r.th.heat_rest}℃·${r.th.heat_stop}℃ 기준)으로 하고, AI는 그 결과로 우선순위를 씁니다.`),
+    el("div", { class: "row", style: { gap: "6px", flexWrap: "wrap" } }, chip(r.src.weather, "기상청"), chip(r.src.messages, "재난문자"),
+      el("span", { class: "tag info" }, `아차사고 ${r.src.incidents}건`),
+      el("span", { class: "small muted" }, `체감온도 ${w.feel}℃ · 특보 ${(w.active || []).map(x => x.kind + x.level).join(", ") || "없음"}`)),
+    txt, mode,
+    r.rows.length ? el("div", { class: "tbl-scroll", style: { marginTop: "10px" } }, el("table", { class: "t" },
+      el("tr", {}, ["판정", "작업", "최고 위험성", "이유", ""].map(h => el("th", {}, h))),
+      ...r.rows.map(x => el("tr", {}, el("td", {}, el("span", { class: "tag " + BR_LV[x.level] }, x.label)), el("td", {}, `${x.fac} · ${x.work}`),
+        el("td", {}, x.top), el("td", { class: "small" }, x.why.join(" / ")), el("td", {}, el("button", { class: "small", onclick: () => openA(x.id) }, "열기")))))) : null));
+}
+
+// ------------------------------------------------------------ 물어보기(이어 묻기)
+const EX = ["사다리 작업 안전 기준은?", "폭염 때 실외 작업은 어떻게 해?", "밀폐공간 들어가기 전에 뭘 해야 해?", "오늘 시작 못 하는 작업 있어?", "약품 다룰 때 조심할 건?", "위험성 몇 점부터 작업 전에 조치해야 해?"];
+let CONV = [];
+function askTurn(t) {
+  const r = t.r;
+  if (!r) return el("div", { class: "panel chat-turn" }, el("div", { class: "chat-q" }, t.q), el("div", {}, el("span", { class: "spinner" }), " 규정·위험요인에서 찾는 중"));
+  return el("div", { class: "panel chat-turn" },
+    el("div", { class: "row" }, el("div", { class: "chat-q", style: { flex: 1 } }, t.q), el("span", { class: "tag " + (/모델/.test(r.mode) ? "ok" : "gray") }, r.mode)),
+    r.carried ? el("p", { class: "small muted" }, `앞 질문의 '${r.carried}'를 이어서 봤습니다.`) : null,
+    el("div", { class: "ans", style: { marginTop: "8px", whiteSpace: "pre-line" } }, r.answer),
+    r.general && /모델/.test(r.mode) ? el("p", { class: "small muted" }, "※ 질문에 딱 맞는 조문·위험요인이 없어 기관 위험요인 목록 전체로 답했습니다.") : null,
+    r.dropped ? el("p", { class: "small", style: { color: "var(--warn)" } }, "※ " + r.dropped) : null,
+    r.masked && r.masked.length ? el("p", { class: "small muted" }, `※ 질문의 개인정보(${r.masked.join(", ")})를 ○○○로 가린 뒤 처리했습니다.`) : null,
+    r.sources.length ? el("div", { class: "small muted", style: { marginTop: "8px" } }, "근거: ", citeChips(r.sources)) : null,
+    r.facts.length ? el("details", { style: { marginTop: "8px" } }, el("summary", { class: "small muted" }, `답에 쓴 사실 ${r.facts.length}개 (숫자·기준은 모두 여기서만 가져옴)`),
+      el("ul", { class: "small" }, r.facts.map(f => el("li", {}, f)))) : null);
+}
+function drawConv() {
+  $("#ask-out").replaceChildren(...CONV.map(askTurn),
+    CONV.length ? el("div", { class: "row small muted", style: { justifyContent: "space-between" } },
+      el("span", {}, `이어서 물어보면 앞 질문의 위험요인을 이어받습니다. 예: "그럼 2m 넘으면?"`),
+      el("button", { class: "small", onclick: () => { CONV = []; drawConv(); } }, "새 대화")) : null);
+}
+async function ask(q) {
+  q = (q || $("#q").value).trim();
+  if (!q) return;
+  $("#q").value = "";
+  const history = CONV.filter(t => t.r).slice(-4).map(t => ({ q: t.q, a: t.r.answer }));
+  const turn = { q };
+  CONV.push(turn); drawConv();
+  try { turn.r = await api("POST", "/api/ask", { q, history }); }
+  catch (e) { CONV.pop(); $("#q").value = q; drawConv(); throw e; }
+  drawConv();
+  const last = $("#ask-out").lastElementChild.previousElementSibling;
+  if (last) last.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// ------------------------------------------------------------ 평가표 미리보기·고치기·사진(좌우 분할)
+let REP = null;
+async function openSheetEditor(reset) {
+  if (!REP || reset) REP = (await api("GET", `/api/assess/${CUR.id}/preview`)).blocks;
+  drawReportEditor();
+  $("#rep-edit").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+function readImage(file) {
+  return new Promise((ok, bad) => {
+    if (!/^image\/(png|jpeg|gif)$/.test(file.type)) return bad(new Error("PNG·JPG·GIF 사진만 넣을 수 있습니다"));
+    if (file.size > 8 * 1024 * 1024) return bad(new Error("사진 한 장은 8MB까지 넣을 수 있습니다"));
+    const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => bad(r.error); r.readAsDataURL(file);
+  });
+}
+function addPhotos(at) {
+  const inp = el("input", { type: "file", accept: "image/png,image/jpeg,image/gif", multiple: true, hidden: true, onchange: async () => {
+    try {
+      const imgs = [];
+      for (const f of inp.files) imgs.push(["image", await readImage(f), f.name.replace(/\.[^.]+$/, "")]);
+      REP.splice(at, 0, ...imgs); drawReportEditor(); toast(`사진 ${imgs.length}장을 넣었습니다`);
+    } catch (e) { toast(e.message, true); }
+    inp.remove();
+  } });
+  document.body.append(inp); inp.click();
+}
+const BK_LABEL = { title: "제목", h1: "장 제목", h2: "소제목", h3: "소제목", p: "문단", bullet: "○ 항목", note: "※ 참고", summary: "핵심 요약", table: "표", image: "사진" };
+function reportPreview() {
+  const go = i => () => { const t = document.getElementById("rbe-" + i); if (t) { t.scrollIntoView({ behavior: "smooth", block: "center" }); const f = t.querySelector("textarea,input"); if (f) f.focus({ preventScroll: true }); } };
+  return el("div", { class: "rep-doc" }, ...REP.map((b, i) => {
+    const k = b[0];
+    let body;
+    if (k === "title") body = el("div", { class: "rb-title" }, b[1]);
+    else if (k === "h1" || k === "h2" || k === "h3") body = el("div", { class: "rb-h2" }, "□ " + b[1]);
+    else if (k === "bullet") body = el("div", { class: "rb-bullet" }, "○ " + b[1]);
+    else if (k === "note") body = el("div", { class: "rb-note" }, b[1]);
+    else if (k === "p") body = el("div", { class: "rb-p" }, b[1]);
+    else if (k === "summary") body = el("div", { class: "rb-summary" }, ...b[1].map(x => el("div", { class: "rb-bullet" }, "○ " + x)));
+    else if (k === "table") body = el("div", { class: "tbl-scroll" }, el("table", { class: "rb-table" }, el("tr", {}, ...b[1].map(h => el("th", {}, h))), ...b[2].map(r => el("tr", {}, ...r.map(c => el("td", { style: { whiteSpace: "pre-line" } }, String(c)))))));
+    else if (k === "image") body = el("figure", { class: "rb-fig" }, el("img", { src: b[1], alt: b[2] || "현장 사진" }), b[2] ? el("figcaption", {}, "<그림> " + b[2]) : null);
+    return el("div", { class: "rb", onclick: go(i), title: "눌러서 왼쪽에서 고치기" }, body);
+  }));
+}
+function refreshPreview() {
+  const pv = $("#rep-pv");
+  if (!pv) return;
+  const top = pv.scrollTop;
+  pv.replaceChildren(reportPreview());
+  pv.scrollTop = top;
+}
+function reportFields() {
+  const area = (val, set, rows) => {
+    const t = el("textarea", { rows: rows || Math.min(8, Math.max(2, Math.ceil(String(val).length / 46))) }, String(val));
+    t.addEventListener("input", () => { set(t.value); refreshPreview(); });
+    return t;
+  };
+  const line = (val, set) => { const t = el("input", { value: val }); t.addEventListener("input", () => { set(t.value); refreshPreview(); }); return t; };
+  const tools = i => el("span", { class: "rbe-tools" },
+    S.llm && ["p", "note", "bullet"].includes(REP[i][0]) ? el("button", { class: "small", title: "뜻과 숫자는 그대로 두고 공문체로 다듬습니다", onclick: e => aiPolish(i, e.currentTarget) }, "AI 다듬기") : null,
+    el("button", { class: "icon-btn", title: "위로", disabled: i === 0, onclick: () => { [REP[i - 1], REP[i]] = [REP[i], REP[i - 1]]; drawReportEditor(); } }, "↑"),
+    el("button", { class: "icon-btn", title: "아래로", disabled: i === REP.length - 1, onclick: () => { [REP[i + 1], REP[i]] = [REP[i], REP[i + 1]]; drawReportEditor(); } }, "↓"),
+    el("button", { class: "small", onclick: () => { REP.splice(i + 1, 0, ["p", ""]); drawReportEditor(); } }, "+ 문단"),
+    el("button", { class: "small", onclick: () => addPhotos(i + 1) }, "+ 사진"),
+    el("button", { class: "small danger", onclick: () => { REP.splice(i, 1); drawReportEditor(); } }, "삭제"));
+  return REP.map((b, i) => {
+    const k = b[0];
+    let body;
+    if (k === "title" || k === "h1" || k === "h2" || k === "h3") body = line(b[1], v => (b[1] = v));
+    else if (k === "p" || k === "bullet" || k === "note") body = area(b[1], v => (b[1] = v));
+    else if (k === "summary") body = area(b[1].join("\n"), v => (b[1] = v.split("\n")), b[1].length + 1);
+    else if (k === "table") body = el("div", { class: "tbl-scroll" }, el("table", { class: "rbe-table" },
+      el("tr", {}, ...b[1].map((h, c) => el("th", {}, line(h, v => (b[1][c] = v))))),
+      ...b[2].map(r => el("tr", {}, ...r.map((cv, c) => el("td", {}, line(String(cv), v => (r[c] = v))))))));
+    else if (k === "image") body = el("div", { class: "row", style: { gap: "10px", alignItems: "center" } }, el("img", { class: "rbe-thumb", src: b[1], alt: "" }),
+      el("label", { style: { flex: 1 } }, el("div", { class: "small muted" }, "그림 설명"), line(b[2] || "", v => (b[2] = v))));
+    return el("div", { class: "rbe", id: "rbe-" + i }, el("div", { class: "rbe-head" }, el("span", { class: "tag gray" }, BK_LABEL[k] || k), el("span", { style: { flex: 1 } }), tools(i)), body);
+  });
+}
+async function aiPolish(i, btn) {
+  busy(btn, true, "다듬는 중");
+  try {
+    const r = await api("POST", "/api/report/polish", { text: REP[i][1] });
+    if (/모델/.test(r.mode)) { REP[i][1] = r.text; toast("문단을 다듬었습니다(사실 대조 통과)"); drawReportEditor(); } else toast(r.dropped || "원문을 그대로 둡니다");
+  } finally { busy(btn, false); }
+}
+async function aiExplainItems(btn) {
+  const items = CUR.items.filter(i => i.confirmed);
+  if (!items.length) { toast("평가표에 들어간 위험요인이 없습니다"); return; }
+  const sec = [["h2", "위험요인 해설"]];
+  let ok = 0;
+  try {
+    for (const [n, it] of items.entries()) {
+      busy(btn, true, `해설 쓰는 중 ${n + 1}/${items.length}`);
+      const r = await api("POST", `/api/assess/${CUR.id}/explain`, { code: it.code });
+      sec.push(["bullet", `${n + 1}. ${it.name}: ${r.text}`]);
+      if (/모델/.test(r.mode)) ok++;
+    }
+    const old = REP.findIndex(b => b[0] === "h2" && b[1] === "위험요인 해설");
+    if (old >= 0) { let e = old + 1; while (e < REP.length && REP[e][0] === "bullet") e++; REP.splice(old, e - old, ...sec); }
+    else { const at = REP.findIndex(b => b[0] === "h2" && /판단 이유/.test(b[1])); REP.splice(at >= 0 ? at : 6, 0, ...sec); }
+    toast(`위험요인 ${items.length}건 해설을 넣었습니다` + (ok < items.length ? ` (모델 ${ok}건, 규칙 ${items.length - ok}건)` : ""));
+    drawReportEditor();
+  } finally { busy(btn, false); }
+}
+async function aiOpinion(btn) {
+  busy(btn, true, "종합 의견 쓰는 중");
+  try {
+    const r = await api("POST", `/api/assess/${CUR.id}/opinion`);
+    const sec = [["h2", "종합 의견"], ...r.lines.map(x => ["bullet", x])];
+    const old = REP.findIndex(b => b[0] === "h2" && b[1] === "종합 의견");
+    if (old >= 0) { let e = old + 1; while (e < REP.length && REP[e][0] === "bullet") e++; REP.splice(old, e - old, ...sec); }
+    else { const at = REP.findIndex(b => b[0] === "h2" && b[1] === "평가 참여자 확인"); REP.splice(at >= 0 ? at : REP.length, 0, ...sec); }
+    toast(`종합 의견 ${r.lines.length}개 항목을 넣었습니다(${r.mode})` + (r.dropped ? " · " + r.dropped : "")); drawReportEditor();
+  } finally { busy(btn, false); }
+}
+function drawReportEditor() {
+  const host = $("#rep-edit");
+  if (!host || !REP) return;
+  const nImg = REP.filter(b => b[0] === "image").length;
+  const left = el("div", { class: "rep-left" },
+    el("div", { class: "rep-ai" }, el("b", {}, "AI 초안"),
+      el("p", { class: "small muted" }, `위험성평가 결과로 만든 평가표 초안입니다${S.llm ? ". AI가 쓴 문장은 평가 결과와 숫자·위험요인 코드를 대조해, 근거에 없는 것이 있으면 버리고 규칙 문장을 씁니다" : ". 모델을 연결하면 AI가 해설·종합 의견을 씁니다"}. 고치면 오른쪽 미리보기에 바로 반영됩니다.`),
+      el("div", { class: "row", style: { gap: "6px", flexWrap: "wrap" } },
+        el("button", { class: "small", onclick: e => aiExplainItems(e.currentTarget) }, S.llm ? "위험요인마다 AI 해설 넣기" : "위험요인 해설 넣기(규칙)"),
+        el("button", { class: "small", onclick: e => aiOpinion(e.currentTarget) }, S.llm ? "AI로 종합 의견 쓰기" : "종합 의견 넣기(규칙)"),
+        el("button", { class: "small", onclick: () => addPhotos(REP.length) }, "현장 사진 넣기(맨 끝)"))),
+    ...reportFields());
+  const right = el("div", { class: "rep-right" }, el("div", { class: "rep-right-head small muted" }, `미리보기 · 블록을 누르면 왼쪽 칸으로 이동${nImg ? ` · 사진 ${nImg}장` : ""}`), el("div", { id: "rep-pv" }, reportPreview()));
+  host.replaceChildren(el("div", { class: "panel" },
+    el("div", { class: "row" }, el("h2", { style: { flex: 1, margin: 0 } }, "위험성평가표 고치기"),
+      el("span", { class: "small muted" }, "내려받기:"), exportButtons(`/api/assess/${CUR.id}/export`, () => ({ blocks: REP })),
+      el("button", { class: "small", onclick: () => openSheetEditor(true) }, "처음 내용으로"),
+      el("button", { class: "small", onclick: () => { REP = null; host.replaceChildren(); } }, "닫기")),
+    el("div", { class: "rep-split" }, left, right)));
 }
 
 // ------------------------------------------------------------ 아차사고
@@ -306,6 +519,9 @@ async function renderLog() {
 document.addEventListener("DOMContentLoaded", async () => {
   GO = setupTabs(id => { if (id === "log") renderLog(); if (id === "about") renderAbout(); });
   $("#n-run").addEventListener("click", runNew);
+  $("#ask-btn").addEventListener("click", () => ask());
+  $("#q").addEventListener("keydown", e => { if (e.key === "Enter") ask(); });
+  $("#ask-ex").append(...EX.map(x => el("span", { class: "chip", onclick: () => ask(x) }, x)));
   $("#n-wx").addEventListener("click", loadWx);
   $("#n-example").addEventListener("click", () => {
     $("#n-fac").value = "종합체육센터"; $("#n-dept").value = "체육사업팀"; $("#n-temp").value = "";

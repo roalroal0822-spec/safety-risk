@@ -123,6 +123,86 @@ def checks(c):
     t2 = c.call("GET", f"/api/assess/{rf['id']}/tbm")["lines"]
     yield "TBM에 날씨·작업 중지·재난문자", any("체감온도" in x for x in t2) and any("특보가 풀린 뒤" in x for x in t2) and any("재난문자" in x for x in t2)
     yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 5
+    # 규칙 기반(모델 없음)에서도 새 기능이 동작
+    br = c.call("GET", "/api/briefing")
+    lv = {r["id"]: r for r in br["rows"]}
+    yield f"오늘 작업 브리핑: 실외 높은 곳 작업은 강풍특보로 '작업 중지'", lv.get(rf["id"], {}).get("label") == "작업 중지" and "작업 중지" in br["rule"]
+    q1 = c.call("POST", "/api/ask", {"q": "사다리 작업 안전 기준은?"})
+    yield "물어보기(규칙): 사다리 → 떨어짐 감소대책·규정 근거", q1["mode"] == "규칙 기반" and any("떨어짐" in f for f in q1["facts"]) and q1["sources"]
+    pv = c.call("GET", f"/api/assess/{a['id']}/preview")["blocks"]
+    edited = [list(b) for b in pv] + [["image", __import__("base64").b64encode((ROOT / "sample_data/사진/조명교체_사다리.png").read_bytes()).decode(), "현장 사진"]]
+    edited[0][1] = "위험성평가표(화면에서 고침)"
+    hw = c.call("POST", f"/api/assess/{a['id']}/export?fmt=hwpx", {"blocks": edited}, raw=True)
+    import io, zipfile
+    z = zipfile.ZipFile(io.BytesIO(hw))
+    yield "평가표 미리보기에서 고친 내용·사진으로 한글 내려받기", "화면에서 고침" in z.read("Contents/section0.xml").decode() and any(n.startswith("BinData/") for n in z.namelist())
+
+
+def fake_llm():
+    """OpenAI 호환 모델 서버 흉내(업스테이지 솔라 등). 사실 첫 줄로 답하고, 질문에 '거짓'이 있으면 사실에 없는 숫자·코드를 지어낸다."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            H.seen.append((self.headers.get("Authorization"), body))
+            msgs = body["messages"]
+            last = msgs[-1]["content"]
+            last = last if isinstance(last, str) else " ".join(x.get("text", "") for x in last if isinstance(x, dict))
+            facts = [x[2:] for x in last.splitlines() if x.startswith("- ")]
+            sysmsg = msgs[0]["content"] if msgs[0]["role"] == "system" and isinstance(msgs[0]["content"], str) else ""
+            if "JSON" in sysmsg or "JSON" in last:
+                text = '{"hazards": []}'
+            elif "거짓" in last:
+                text = "H99 위험이 있고 추락 높이는 37m입니다."
+            elif "종합 의견" in sysmsg or "TBM" in sysmsg:
+                text = "\n".join(f"- {f}" for f in facts[:3])
+            elif "다듬어" in sysmsg:
+                text = facts[0] if facts else ""
+            else:
+                text = f"<think>생각</think>정리하면 {facts[0] if facts else ''}"
+            out = {"choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}
+            b = json.dumps(out, ensure_ascii=False).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b)
+
+        def log_message(self, *a):
+            pass
+
+    H.seen = []
+    s = HTTPServer(("127.0.0.1", 0), H)
+    s.seen = H.seen
+    threading.Thread(target=s.serve_forever, daemon=True).start()
+    return s
+
+
+def ai_checks(c, fl):
+    yield "모델 연결 표시 openai:solar-pro4", c.call("GET", "/api/info")["llm"] == "openai:solar-pro4"
+    a = c.call("POST", "/api/assess", {"fac": "종합체육센터", "dept": "체육사업팀", "work": "체육관 천장 조명(등기구) 교체",
+                                       "text": "이동식 일자 사다리로 높이 4m 등기구 안정기 교체. 혼자 작업, 바닥 왁스 청소 직후"})
+    yield "모델 연결 상태에서 평가 만들기(모델 제안 없음 → 규칙 결과 유지)", {"H01", "H02", "H03"} <= {i["code"] for i in a["items"]}
+    yield "모델 서버에 키를 Authorization 으로 보냄", fl.seen[-1][0] == "Bearer test-llm-key" and fl.seen[-1][1]["model"] == "solar-pro4"
+    r1 = c.call("POST", "/api/ask", {"q": "사다리 작업 안전 기준은?"})
+    yield "물어보기: 모델 답(생각 과정 지움, 사실 대조 통과)", "모델" in r1["mode"] and r1["answer"].startswith("정리하면")
+    r2 = c.call("POST", "/api/ask", {"q": "그럼 2m 넘으면?", "history": [{"q": "사다리 작업 안전 기준은?", "a": r1["answer"]}]})
+    sent = fl.seen[-1][1]["messages"]
+    yield f"이어 묻기: 앞 질문의 '{r2['carried']}' 이어받고 앞 대화 전달", r2["carried"] and any("높이" in f or "떨어짐" in f for f in r2["facts"]) and len(sent) == 4
+    r3 = c.call("POST", "/api/ask", {"q": "거짓말로 위험 알려줘"})
+    yield "모델이 사실에 없는 숫자·코드(37, H99)를 쓰면 버림", r3["mode"] == "규칙 기반" and "H99" in r3["dropped"]
+    code = a["items"][0]["code"]
+    ex = c.call("POST", f"/api/assess/{a['id']}/explain", {"code": code})
+    yield f"위험요인 {code} AI 해설", "모델" in ex["mode"]
+    op = c.call("POST", f"/api/assess/{a['id']}/opinion")
+    yield f"AI 종합 의견 {len(op['lines'])}개 항목", "모델" in op["mode"] and len(op["lines"]) == 3
+    tb = c.call("POST", f"/api/assess/{a['id']}/tbm/ai")
+    yield "AI TBM 낭독 문안", "모델" in tb["mode"] and tb["lines"]
+    po = c.call("POST", "/api/report/polish", {"text": "사다리 높이 4m 작업은 안전대를 착용함."})
+    yield "평가표 문단 AI 다듬기(숫자 유지)", "모델" in po["mode"] and "4m" in po["text"]
+    bi = c.call("POST", "/api/briefing/ai")
+    yield "AI 오늘 작업 브리핑(사실 대조 통과)", "모델" in bi["mode"] and c.call("GET", "/api/briefing")["ai"]["text"] == bi["text"]
 
 
 def main():
@@ -147,6 +227,28 @@ def main():
             total += 1
             failed += 0 if ok else 1
             print(f"  {'통과' if ok else '실패'}  {label}")
+        fl = fake_llm()
+        tmp2 = tempfile.mkdtemp(prefix="smoke-safety-ai-")
+        env2 = dict(env, APP_DATA_DIR=tmp2, LLM_PROVIDER="openai", LLM_BASE_URL=f"http://127.0.0.1:{fl.server_port}/v1",
+                    LLM_MODEL="solar-pro4", LLM_API_KEY="test-llm-key")
+        port2 = free_port()
+        proc2 = subprocess.Popen([sys.executable, "run.py", "--no-browser", "--port", str(port2)], cwd=ROOT, env=env2,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        try:
+            c2 = Client(port2)
+            for _ in range(60):
+                try:
+                    c2.call("GET", "/api/info")
+                    break
+                except Exception:
+                    time.sleep(0.3)
+            for label, ok in ai_checks(c2, fl):
+                total += 1
+                failed += 0 if ok else 1
+                print(f"  {'통과' if ok else '실패'}  {label}")
+        finally:
+            proc2.terminate()
+            shutil.rmtree(tmp2, ignore_errors=True)
     except Exception as e:
         total += 1
         failed += 1

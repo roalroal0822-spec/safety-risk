@@ -16,6 +16,7 @@ from core.pii import mask
 from core.store import Store
 from core.xlsx import CTYPE as XLSX, workbook
 
+import ai
 import assess
 import feeds
 from kb import KB
@@ -40,7 +41,9 @@ ABOUT = {
                  ("규정 기준 판정", "위험성 6 이상은 작업 전 감소대책 완료(규정 조문에서 읽은 값)"),
                  ("모델 제안(선택)", "목록에 있는 코드이고 근거 문구가 설명에 그대로 있어야 받음, 사진은 '현장 확인 필요'"),
                  ("날씨·재난문자", "기상청 체감온도·기상특보로 작업 시작 판정, 긴급재난문자와 겹치는 평가에 수시평가 표시"),
-                 ("평가표·TBM", "평가표·TBM 문안·서명지, 아차사고가 나면 수시평가 표시")],
+                 ("평가표·TBM", "평가표·TBM 문안·서명지, 아차사고가 나면 수시평가 표시"),
+                 ("오늘 작업 브리핑", "기상청 체감온도·특보, 재난문자, 아차사고, 미완료 조치를 평가마다 엮어 작업 중지·시작 전 조치·주의·시작 가능을 규칙으로 판정, AI는 우선순위 문장만"),
+                 ("생성형 AI 문장(선택)", "물어보기(이어 묻기)·위험요인 해설·종합 의견·TBM 문안·문단 다듬기. 근거 사실에 없는 숫자·위험요인 코드가 있으면 버리고 규칙 문장")],
     "guards": ["가능성·중대성 조정과 작업 시작 판정은 모델이 하지 않고 규칙으로만 합니다.",
                "모델이 제안한 위험요인은 기관 목록에 있는 코드여야 하고, 근거 문구가 작업 설명에 그대로 있어야 받습니다.",
                "사진에서 모델이 본 위험은 '현장 확인 필요'로 두고, 담당자가 확인해야 평가표에 들어갑니다.",
@@ -50,7 +53,9 @@ ABOUT = {
                "현장에서 보탠 낱말은 작업 설명에 실제로 있던 말만 받고, 따로 표시하며 뺄 수 있습니다.",
                "관련 기준은 법령 이름과 주제까지만 적고, 조문 번호를 지어내지 않습니다.",
                "기상특보에 따른 작업 중지는 특보 종류와 작업 조건(실외·높은 곳)으로 규칙만으로 판정하고, 체감온도는 기상청 공개 식으로 계산합니다.",
-               "작업 설명·아차사고에 적은 개인정보(전화·주민번호·계좌 등)는 저장·모델 전달 전에 ○○○로 가립니다."],
+               "작업 설명·아차사고에 적은 개인정보(전화·주민번호·계좌 등)는 저장·모델 전달 전에 ○○○로 가립니다.",
+               "AI가 쓴 문장(답변·해설·종합 의견·TBM 문안·브리핑)에 근거 사실에 없는 숫자나 위험요인 코드가 하나라도 있으면 버리고 규칙 문장을 쓰며, 이유를 화면에 표시합니다.",
+               "공개 시연판은 화면에서 모델 설정을 바꿀 수 없고(키 유출 방지), 모델 호출은 1분에 40번으로 묶습니다."],
     "data": ["시연 자료(위험요인 목록·규정·작업·아차사고)는 모두 지어낸 모의자료입니다. 기관 자료로 바꾸면 그대로 동작합니다.",
              "날씨(기상청 단기예보·기상특보)와 긴급재난문자(행정안전부)는 키를 넣으면 실제 자료를, 키가 없거나 연결이 안 되면 예시 자료를 쓰고 화면에 출처를 표시합니다.",
              "관련 기준의 세부 조문은 국가법령정보센터에서 확인하도록 했습니다.",
@@ -59,7 +64,7 @@ ABOUT = {
 }
 webcommon.register_about(app, HERE, ABOUT)
 
-STATE = {"kb": None}
+STATE = {"kb": None, "brief_ai": None}
 
 
 def log(action, detail=""):
@@ -311,10 +316,7 @@ def _mlist(it):
                      for m in it["measures"])
 
 
-@app.post("/api/assess/<aid>/export")
-def export_sheet(req):
-    a = get_a(req.params["aid"])
-    k = kb()
+def sheet_blocks(a):
     items = [i for i in a["items"] if i["confirmed"]]
     cond = a["conditions"]
     cd = ", ".join(x for x in [f"높이 {cond['height']:g}m" if "height" in cond else "", "1인 작업" if cond.get("alone") else "",
@@ -343,9 +345,59 @@ def export_sheet(req):
         blocks += [("h2", "수시평가 사유")] + [("bullet", f"{r['date']} {r.get('kind', '아차사고')}: {r['text']}") for r in a["reassess"]]
     blocks += [("h2", "평가 참여자 확인"), ("table", ["구분", "성명", "서명"], [["작업 책임자", "", ""], ["작업자", "", ""], ["작업자", "", ""], ["안전 담당", "", ""]], [2, 3, 3]),
                ("note", f"※ 작성: 무사히(현장 위험성평가 AI, {a['engine']}). 위험요인·가능성·중대성은 담당자가 현장에서 확인해 고친 값입니다. 기록은 규정에 따라 보존합니다.")]
+    pics = []
+    for n in a.get("photos") or []:
+        p = PHOTOS / n
+        if p.exists():
+            pics.append(("image", f"data:{IMG[p.suffix]};base64," + base64.b64encode(p.read_bytes()).decode(), "작업 현장 사진"))
+    if pics:
+        at = next(i for i, b in enumerate(blocks) if b[0] == "h2" and b[1] == "평가 참여자 확인")
+        blocks[at:at] = [("h2", "현장 사진")] + pics
+    return blocks
+
+
+REPORT_KINDS = {"title", "h1", "h2", "h3", "p", "bullet", "note", "summary", "table", "image"}
+
+
+def _clean_blocks(raw):
+    """화면에서 고친 블록 목록을 검사해 내보내기 형식(튜플)으로 바꾼다."""
+    from core.export import image_info
+    out = []
+    for b in raw if isinstance(raw, list) else []:
+        if not isinstance(b, list) or not b or b[0] not in REPORT_KINDS:
+            raise HttpError(400, "평가표 내용 형식이 올바르지 않습니다")
+        k = b[0]
+        if k == "table":
+            out.append(("table", [str(x) for x in b[1]], [[str(c) for c in r] for r in b[2]], b[3] if len(b) > 3 else None))
+        elif k == "summary":
+            out.append(("summary", [str(x) for x in b[1] if str(x).strip()]))
+        elif k == "image":
+            try:
+                image_info(b[1])
+            except Exception as e:
+                raise HttpError(400, f"그림을 읽지 못했습니다: {e}")
+            out.append(("image", b[1], str(b[2]) if len(b) > 2 else ""))
+        else:
+            out.append((k, str(b[1])))
+    if not out:
+        raise HttpError(400, "평가표 내용이 비어 있습니다")
+    return out
+
+
+@app.get("/api/assess/<aid>/preview")
+def sheet_preview(req):
+    """화면 미리보기·수정용 평가표 블록(내려받기와 같은 내용, 첨부 사진 포함)."""
+    return {"blocks": [list(b) for b in sheet_blocks(get_a(req.params["aid"]))]}
+
+
+@app.post("/api/assess/<aid>/export")
+def export_sheet(req):
+    a = get_a(req.params["aid"])
+    b = req.json or {}
+    blocks = _clean_blocks(b["blocks"]) if b.get("blocks") else sheet_blocks(a)
     fmt = req.query.get("fmt", "hwpx")
     data, ctype = export(blocks, fmt)
-    log("위험성평가표 내보내기", a["work"])
+    log("위험성평가표 내보내기", a["work"] + (" (화면에서 고침)" if b.get("blocks") else ""))
     return file_response(data, f"위험성평가표_{a['fac']}_{a['work'][:20]}.{fmt}", ctype)
 
 
@@ -432,6 +484,123 @@ def tbm_doc(req):
     data, ctype = export(blocks, fmt)
     log("TBM 기록지 만들기", a["work"])
     return file_response(data, f"TBM기록_{a['work'][:20]}.{fmt}", ctype)
+
+
+# ------------------------------------------------------------ 생성형 AI(사실 대조)
+
+def _item_facts(a, it):
+    f = [f"작업: {a['fac']} {a['work']}. 작업 설명: {a['text']}",
+         f"위험요인 {it['code']} {it['name']}({it['type']}): 가능성 {it['L']} × 중대성 {it['S']} = 위험성 {it['R']}, 판단 {it['level_label']}, 감소대책 후 위험성 {it['R_after']}"]
+    f += [f"판단 이유: {r['text']}" for r in it["reasons"]]
+    f += [f"감소대책: {m['text']}" + (" (완료)" if m["done"] else "") for m in it["measures"]]
+    if it.get("law"):
+        f.append(f"관련 기준: {it['law']}")
+    if it.get("basis"):
+        f.append(f"기관 규정: {it['basis']['reg']} {it['basis']['label']}({it['basis']['title']})")
+    return f
+
+
+@app.post("/api/assess/<aid>/explain")
+def explain_item(req):
+    """위험요인 하나를 작업자가 이해하기 쉽게 풀어 쓴다(왜 위험한지, 대책 순서)."""
+    a = get_a(req.params["aid"])
+    code = (req.json or {}).get("code")
+    it = next((i for i in a["items"] if i["code"] == code), None)
+    if not it:
+        raise HttpError(404, "위험요인을 찾지 못했습니다")
+    rule = f"{it['name']} 위험은 가능성 {it['L']}, 중대성 {it['S']}로 위험성 {it['R']}({it['level_label']})임. 먼저 " + ", ".join(m["text"] for m in it["measures"][:2]) + "을(를) 함."
+    res = ai.guard(llm, "위험성평가표에 들어갈 '해설' 문단을 한국어 2~3문장 공문체(~함, ~임)로 쓰세요. 이 작업에서 왜 위험한지와 감소대책을 어떤 순서로 하면 좋은지 말하세요.",
+                   _item_facts(a, it), rule)
+    log("위험요인 해설", f"{a['work']} {code} {res['mode']}")
+    return dict(res, code=code)
+
+
+@app.post("/api/assess/<aid>/opinion")
+def opinion(req):
+    """평가표 끝의 '종합 의견'. 판정·위험성·날씨·수시평가 사실에서만 쓴다."""
+    a = get_a(req.params["aid"])
+    st = assess.stats(a)
+    items = [i for i in a["items"] if i["confirmed"]]
+    facts = [f"작업: {a['fac']} {a['work']}, 상태 {a['status']}, 판정 {'작업 시작 가능' if st['ready'] else '작업 전 조치 필요'}"]
+    facts += [f"{i['code']} {i['name']}: 위험성 {i['R']}({i['level_label']}), 미완료 대책 {sum(1 for m in i['measures'] if not m['done'])}건" for i in items]
+    wx = a.get("weather")
+    if wx:
+        facts.append(f"작업 당일 체감온도 {wx['feel']:g}℃, 특보 {', '.join(w['kind'] + w['level'] for w in wx['warnings']) or '없음'}, 작업 중지 {'; '.join(wx['stops']) or '없음'}")
+    facts += [f"수시평가 사유: {r['text']}" for r in a["reassess"]]
+    rule = []
+    if st["blocked"]:
+        rule.append("작업 전에 " + ", ".join(st["blocked"]) + "의 감소대책을 마쳐야 작업을 시작할 수 있음.")
+    if st["weather_stops"]:
+        rule.append("기상특보로 " + "; ".join(st["weather_stops"]) + ".")
+    if a["reassess"]:
+        rule.append(f"수시평가 사유 {len(a['reassess'])}건이 있어 작업 책임자가 현장을 다시 확인해야 함.")
+    if st["ready"]:
+        rule.append("확인한 위험요인의 작업 전 대책이 끝나 작업을 시작할 수 있음. 작업 중 관리 대상은 작업 책임자가 수시로 확인함.")
+    rule.append("작업 전 안전점검회의(TBM)에서 위 내용을 전달하고 참석자 서명을 받음.")
+    res = ai.guard(llm, "위험성평가표 끝의 '종합 의견'을 공문체(~함, ~임)로 3~4개 항목으로 쓰세요. 한 줄에 한 항목, 앞에 기호를 붙이지 마세요. 작업 시작 판정을 그대로 따르고 먼저 할 일부터 쓰세요.",
+                   facts, "\n".join(rule), max_tokens=800)
+    res["lines"] = [x.strip(" -·•*\t") for x in res["text"].splitlines() if x.strip(" -·•*\t")]
+    log("평가 종합 의견", res["mode"])
+    return res
+
+
+@app.post("/api/report/polish")
+def polish(req):
+    text = ((req.json or {}).get("text") or "").strip()
+    if not text:
+        raise HttpError(400, "다듬을 문장이 없습니다")
+    text = mask(text[:3000])[0]
+    if not llm.enabled:
+        return {"text": text, "mode": "규칙 기반", "dropped": "모델이 연결되지 않아 원문을 그대로 둡니다"}
+    res = ai.guard(llm, "아래 사실은 위험성평가표의 한 문단입니다. 뜻과 숫자를 바꾸지 말고 공문체(~함, ~임)로 간결하게 다듬어 한 문단으로만 출력하세요. 제목·설명은 붙이지 마세요.",
+                   [text], text, max_tokens=900)
+    res["dropped"] = res["dropped"].replace("규칙 문장", "원문")
+    return res
+
+
+@app.post("/api/assess/<aid>/tbm/ai")
+def tbm_ai(req):
+    """TBM 낭독 문안을 현장에서 말하기 쉬운 말로. 규칙 문안의 사실(위험요인·대책·날씨·재난문자) 밖의 내용은 쓰지 않는다."""
+    a = get_a(req.params["aid"])
+    lines = tbm_script(a, kb())
+    facts = lines + [x for it in a["items"] if it["confirmed"] for x in _item_facts(a, it)[1:3]]
+    res = ai.guard(llm, "작업 전 안전점검회의(TBM)에서 작업 책임자가 소리 내어 읽을 문안을 쓰세요. 존댓말, 짧은 문장, 6~9줄, 한 줄에 한 문장, 앞에 기호를 붙이지 마세요. "
+                        "작업 중지 권리와 서명 안내는 꼭 넣으세요.", facts, "\n".join(lines), max_tokens=900)
+    res["lines"] = [x.strip(" -·•*\t") for x in res["text"].splitlines() if x.strip(" -·•*\t")]
+    log("TBM 문안 AI", res["mode"])
+    return res
+
+
+@app.post("/api/ask")
+def ask(req):
+    b = req.json or {}
+    q = (b.get("q") or "").strip()
+    if not q:
+        raise HttpError(400, "질문을 입력하세요")
+    q, hidden = mask(q)
+    hist = [{"q": mask(str(h.get("q") or ""))[0][:300], "a": str(h.get("a") or "")[:1200]}
+            for h in (b.get("history") or [])[-4:] if isinstance(h, dict)]
+    r = ai.ask(kb(), q, assessments(), llm, hist)
+    r["masked"] = hidden
+    log("질문", q)
+    return r
+
+
+@app.get("/api/briefing")
+def get_briefing(req):
+    r = ai.briefing(kb(), assessments(), feeds.weather(), feeds.messages())
+    r["ai"] = STATE.get("brief_ai")
+    return r
+
+
+@app.post("/api/briefing/ai")
+def briefing_ai(req):
+    r = ai.briefing(kb(), assessments(), feeds.weather(), feeds.messages())
+    res = ai.guard(llm, "공공시설 안전 담당자에게 '오늘 작업 브리핑'을 공문체(~함, ~임) 4~6문장으로 쓰세요. 작업마다 정해진 판정(작업 중지·시작 전 조치·주의·시작 가능)을 그대로 따르고, "
+                        "먼저 멈추거나 조치할 작업과 이유, 오늘 날씨·재난문자에서 챙길 점을 말하세요.", r["facts"], r["rule"], max_tokens=900)
+    STATE["brief_ai"] = res
+    log("오늘 작업 브리핑", res["mode"])
+    return res
 
 
 # ------------------------------------------------------------ 공공데이터: 날씨·재난문자
