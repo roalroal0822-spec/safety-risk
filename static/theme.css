@@ -352,3 +352,10 @@ header.top.hero .kh-visual > .kh-photo::after { content: ""; position: absolute;
   background: linear-gradient(180deg, rgba(5,20,47,.25) 0%, transparent 35%, transparent 70%, rgba(5,20,47,.5) 100%), rgba(10, 38, 86, .12); }
 @media (max-width: 1100px) { header.top.hero .kh-visual > .kh-photo { opacity: .45; width: 60vw; } }
 @media (max-width: 720px) { header.top.hero .kh-visual > .kh-photo { display: none; } }
+/* 첫 화면 사진 두 장을 번갈아(천천히 겹쳐 바뀜) */
+header.top.hero .kh-visual > .kh-photo { background: none; }
+.kh-photo i { position: absolute; inset: 0; background-size: cover; background-repeat: no-repeat; }
+.kh-photo .p1 { background-image: url(/img/hero-side.jpg); background-position: 30% 30%; }
+.kh-photo .p2 { background-image: url(/img/hero-side-2.jpg); background-position: 62% 90%; opacity: 0; animation: khswap 14s ease-in-out infinite; }
+@keyframes khswap { 0%, 40% { opacity: 0; } 50%, 90% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .kh-photo .p2 { animation: none; } }
