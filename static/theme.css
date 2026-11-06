@@ -196,8 +196,55 @@ body.on-home main { padding-top: 0; }
   .kh-art { width: 200px; height: 200px; } .kh-head h2 { font-size: 24px; } .kh-cards { grid-template-columns: 1fr; }
   .kh-chips { flex-direction: column; gap: 8px; } .kh-search .hero-search button.primary span { display: none; }
 }
-:root { --accent: #d9480f; --accent-strong: #b23a0b; --accent-soft: #fdefe8; }
-:root { --hero-a:#26110a; --hero-b:#6b2a0e; --hero-hl:#ffc39a; --search-a:#c2410c; --search-b:#e8731f; }
+:root { --accent: #12397a; --accent-strong: #0a2656; --accent-soft: #eaf0f9; --navy: #0a2656; --navy-2: #071c42;
+  --gold: #c9a24a; --gold-soft: #f6efdc; --bg: #f5f7fa; }
+:root { --hero-a:#05142f; --hero-b:#0d2f66; --hero-hl:#f1d48b; --search-a:#0d2f66; --search-b:#1b4b94; }
+
+/* ---- 무사히: 남색·흰 바탕의 행정 서비스 톤 (장식 대신 여백·가는 선·아이콘 칸) ---- */
+.gov-strip { background: var(--navy-2); }
+.gov-strip .pill { color: var(--navy-2); }
+.masthead { border-bottom: 1px solid var(--line); }
+.masthead .ms-mark { background: linear-gradient(150deg, #1b4b94, var(--navy)); box-shadow: 0 6px 14px -8px var(--navy); border-radius: 12px; }
+.masthead .ms-name b { color: var(--navy); }
+nav.tabs { border-top: 0; }
+nav.tabs button.on, nav.tabs.inked button.on { border-bottom-width: 3px; }
+
+.kh-visual { min-height: 430px;
+  background:
+    linear-gradient(180deg, rgba(3, 10, 26, .25) 0%, rgba(3, 10, 26, .55) 100%),
+    radial-gradient(760px 420px at 85% 15%, rgba(56, 110, 196, .38) 0%, transparent 70%),
+    radial-gradient(620px 420px at 5% 100%, rgba(13, 47, 102, .9) 0%, transparent 70%),
+    linear-gradient(135deg, var(--hero-a), var(--hero-b)); }
+.kh-visual::after { background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px); background-size: 64px 64px; }
+.kh-visual::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--gold), transparent); opacity: .7; z-index: 1; }
+.kh-art { stroke: rgba(255,255,255,.06); }
+.kh-eyebrow { color: var(--hero-hl); letter-spacing: .38em; }
+header.top.hero.kh h1 { font-weight: 800; text-shadow: none; }
+.kh-trust li { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.18); backdrop-filter: none; }
+
+.kh-head { border-left: 0; padding: 0; position: relative; }
+.kh-head::after { content: ""; display: block; width: 36px; height: 3px; background: var(--navy); margin-top: 14px; border-radius: 2px; }
+.kh-head h2 { font-size: 28px; font-weight: 800; color: var(--navy-2); }
+.kh-head h2 svg { color: var(--gold); }
+
+.kh-cards { background: transparent; border: 0; padding: 0; gap: 18px; }
+.kc, .kc.g1, .kc.g2, .kc.g3, .kc.g4 { background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 1px 2px rgba(16,24,40,.04);
+  padding: 96px 22px 20px; min-height: 230px; }
+.kc:hover { transform: translateY(-3px); border-color: var(--navy); box-shadow: 0 14px 28px -18px rgba(10, 38, 86, .45); }
+.kc-art { left: 22px; right: auto; top: 22px; bottom: auto; width: 56px; height: 56px; padding: 14px; box-sizing: border-box;
+  background: var(--accent-soft); border-radius: 16px; stroke: var(--navy); stroke-width: 1.7; }
+.kc-t { font-size: 20px; font-weight: 800; color: var(--navy-2); }
+.kc-s { font-weight: 500; color: var(--muted); }
+.kc-tags i { background: var(--fill); border-color: var(--line); color: var(--ink-2); }
+.kc-more { color: var(--navy); font-size: 13.5px; }
+.kc-more svg { stroke: var(--navy); }
+
+.kh-bar { background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--navy); border-radius: 12px; }
+.kh-bar:hover { border-color: var(--navy); }
+.panel { border-radius: 14px; }
+.panel h2, .panel > h3:first-child { color: var(--navy-2); }
+.chat-q::before { color: var(--gold); }
+.foot { background: var(--navy-2); color: rgba(255,255,255,.72); }
 
 /* 평가표 미리보기·고치기 (한톨과 같은 구조) */
 .rep-doc { background: #fff; color: #111; border: 1px solid var(--line); border-radius: 10px; padding: 40px 48px; max-width: 860px; margin: 0 auto; font-family: "Batang", "바탕", serif; line-height: 1.7; box-shadow: 0 2px 14px rgba(0,0,0,.05); }
