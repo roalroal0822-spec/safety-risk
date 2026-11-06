@@ -344,3 +344,11 @@ header.top.hero .kh-visual > .kh-pict { position: absolute; z-index: 0; right: m
 .kh-visual.has-photo .kh-pict { display: none; }
 @media (max-width: 1100px) { header.top.hero .kh-visual > .kh-pict { width: 220px; height: 180px; opacity: .35; } }
 @media (max-width: 720px) { header.top.hero .kh-visual > .kh-pict { display: none; } }
+/* 첫 화면 오른쪽 사진(static/img/hero-side.jpg): 왼쪽 가장자리는 남색으로 녹아들게 */
+header.top.hero .kh-visual > .kh-photo { position: absolute; z-index: 0; top: 0; right: 0; bottom: 0; width: min(46vw, 620px);
+  background: url(/img/hero-side.jpg) var(--hero-pos, 62% 90%) / cover no-repeat;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.55) 22%, #000 48%); mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.55) 22%, #000 48%); }
+header.top.hero .kh-visual > .kh-photo::after { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(5,20,47,.25) 0%, transparent 35%, transparent 70%, rgba(5,20,47,.5) 100%), rgba(10, 38, 86, .12); }
+@media (max-width: 1100px) { header.top.hero .kh-visual > .kh-photo { opacity: .45; width: 60vw; } }
+@media (max-width: 720px) { header.top.hero .kh-visual > .kh-photo { display: none; } }
