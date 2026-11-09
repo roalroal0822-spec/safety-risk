@@ -1,10 +1,11 @@
 "use strict";
-let S = null, GO = null, CUR = null, PHOTOS = [], LASTINC = null, USEWX = false, MSGS = null;
+let S = null, GO = null, CUR = null, PHOTOS = [], LASTINC = null, USEWX = false, MSGS = null, ONLYTODO = false;
 const LV = { bad: "작업 전 조치 완료", warn: "작업 중 관리", ok: "현재 조치 유지" };
 
 async function load() {
   S = await api("GET", "/api/state");
   renderDash(); renderList(); renderInc(); renderLib(); fillTasks();
+  if (FLOW.step === 1) renderCatalog();
 }
 
 function basisChip(b) {
@@ -116,12 +117,194 @@ function startTask(i) {
 async function runNew() {
   const btn = $("#n-run");
   busy(btn, true, "평가 만드는 중");
+  try { await flowCreate(); flowGo(4); }
+  finally { busy(btn, false); }
+}
+
+// ------------------------------------------------------------ 작업 고르기 → 위험요인 조회 → TBM → 위험성평가
+const FLOW = { cat: null, work: null, sel: new Set(), aid: null, sig: "", mode: "risk", step: 1, n: 8, side: [] };
+const KIND_ORDER = ["제거", "대체", "공학적", "관리적", "보호구"];
+const KIND_CLS = { "제거": "k1", "대체": "k2", "공학적": "k3", "관리적": "k4", "보호구": "k5" };
+function kindTag(k) { return k ? el("span", { class: "mk " + (KIND_CLS[k] || "k4"), title: "위험성 감소 우선순위: 제거 → 대체 → 공학적 → 관리적 → 보호구" }, k) : null; }
+function hzName(c) { const h = S.hazards.find(x => x.code === c); return h ? h.name : c; }
+function flowInputs() { return { fac: $("#n-fac").value, dept: $("#n-dept").value, work: $("#n-work").value, text: $("#n-text").value, temp: $("#n-temp").value }; }
+function flowSig() { return JSON.stringify([flowInputs(), [...FLOW.sel].sort(), PHOTOS.map(p => p.name), USEWX]); }
+
+function renderCatalog() {
+  const box = $("#cat-box");
+  if (!box || !S) return;
+  const cats = [...new Set(S.catalog.map(c => c.cat))];
+  if (!FLOW.cat) FLOW.cat = cats[0];
+  const works = [...new Set(S.catalog.filter(c => c.cat === FLOW.cat).map(c => c.work))];
+  if (!works.includes(FLOW.work)) FLOW.work = works[0];
+  const cnt = cat => S.catalog.filter(c => c.cat === cat && FLOW.sel.has(c.id)).length;
+  const wcnt = w => S.catalog.filter(c => c.work === w && FLOW.sel.has(c.id)).length;
+  const steps = S.catalog.filter(c => c.work === FLOW.work);
+  const picked = S.catalog.filter(c => FLOW.sel.has(c.id));
+  box.replaceChildren(
+    el("div", { class: "row" }, el("h3", { style: { margin: 0, flex: 1 } }, "작업 분류에서 단계 고르기"),
+      S.catalog_demo ? el("span", { class: "tag warn", title: "기관 자료에 작업 분류 표가 없어 시연용 분류를 씁니다. '기준·자료'에서 기관 작업 분류 엑셀을 넣으면 바뀝니다." }, "시연용 분류") : null,
+      el("span", { class: "small muted" }, `고른 단계 ${picked.length}개`),
+      picked.length ? el("button", { class: "small", onclick: () => { FLOW.sel.clear(); FLOW.side = []; renderCatalog(); } }, "모두 풀기") : null),
+    el("p", { class: "small muted" }, "분류 → 작업 → 단계 순서로 고르면 단계마다 기관 위험요인 목록의 위험 상황이 따라옵니다. 숫자는 그 단계의 위험 상황 수입니다."),
+    el("div", { class: "cat-grid" },
+      el("div", { class: "cat-col" }, el("div", { class: "cat-h" }, "분류"), cats.map(c => el("button", { class: "cat-it" + (c === FLOW.cat ? " on" : ""), onclick: () => { FLOW.cat = c; FLOW.work = null; renderCatalog(); } },
+        el("span", {}, c), cnt(c) ? el("b", { class: "cat-n" }, cnt(c)) : null))),
+      el("div", { class: "cat-col" }, el("div", { class: "cat-h" }, "작업"), works.map(w => el("button", { class: "cat-it" + (w === FLOW.work ? " on" : ""), onclick: () => { FLOW.work = w; renderCatalog(); } },
+        el("span", {}, w), wcnt(w) ? el("b", { class: "cat-n" }, wcnt(w)) : null))),
+      el("div", { class: "cat-col" }, el("div", { class: "cat-h" }, "단계"),
+        steps.map(st => el("label", { class: "cat-step" + (FLOW.sel.has(st.id) ? " on" : "") },
+          el("input", { type: "checkbox", checked: FLOW.sel.has(st.id), onchange: e => { e.target.checked ? FLOW.sel.add(st.id) : FLOW.sel.delete(st.id); renderCatalog(); } }),
+          el("span", { style: { flex: 1 } }, st.step), el("span", { class: "tag " + (st.rows.length >= 2 ? "warn" : "gray") }, `위험 ${st.rows.length}`))),
+        el("div", { class: "row small", style: { marginTop: "6px" } },
+          el("button", { class: "small", onclick: () => { steps.forEach(st => FLOW.sel.add(st.id)); renderCatalog(); } }, "이 작업 단계 모두 고르기")))),
+    picked.length ? el("div", { class: "cat-picked" }, el("span", { class: "small muted" }, "고른 단계: "),
+      picked.map(st => el("span", { class: "chip" }, `${st.work} · ${st.step} `, el("button", { class: "x", "aria-label": `${st.step} 빼기`, onclick: () => { FLOW.sel.delete(st.id); renderCatalog(); } }, "×")))) : null,
+    FLOW.side.length ? el("div", { class: "small muted", style: { marginTop: "6px" } }, "설명에 함께 나온 작업(고르지 않음): ",
+      FLOW.side.map(w => el("span", { class: "chip", title: "눌러서 이 작업 단계도 고르기", onclick: () => { w.steps.forEach(x => FLOW.sel.add(x)); FLOW.side = FLOW.side.filter(v => v !== w); renderCatalog(); } }, `+ ${w.work} ('${w.words.join("', '")}')`))) : null);
+}
+
+async function flowMatch() {
+  const btn = $("#n-match");
+  busy(btn, true, "찾는 중");
   try {
-    const a = await api("POST", "/api/assess", { fac: $("#n-fac").value, dept: $("#n-dept").value, work: $("#n-work").value,
-      text: $("#n-text").value, temp: $("#n-temp").value, photos: PHOTOS, use_weather: USEWX });
-    PHOTOS = []; $("#n-photo-list").textContent = ""; $("#n-photo").value = ""; USEWX = false; $("#n-wx-box").innerHTML = "";
-    await load(); openA(a.id);
+    const r = await api("POST", "/api/catalog/match", { work: $("#n-work").value, text: $("#n-text").value });
+    const main = r.works.find(w => w.primary);
+    if (!main) { $("#n-match-out").textContent = "작업 분류에서 맞는 작업을 찾지 못했습니다. 아래에서 직접 고르세요."; return; }
+    main.steps.forEach(x => FLOW.sel.add(x));
+    const st = S.catalog.find(c => c.id === main.steps[0]);
+    FLOW.cat = st.cat; FLOW.work = st.work; FLOW.side = r.works.filter(w => !w.primary);
+    const c = r.conditions, cond = [c.height != null ? `높이 ${c.height}m` : null, c.alone ? "1인 작업" : null, c.people ? `${c.people}인 작업` : null,
+      c.temp != null ? `체감온도 ${c.temp}℃` : null, c.open ? "운영 중" : null, c.outdoor ? "실외" : null].filter(Boolean);
+    $("#n-match-out").textContent = `'${main.words.join("', '")}' → ${main.work} 단계 ${main.steps.length}개를 골랐습니다` + (cond.length ? ` · 읽은 조건: ${cond.join(", ")}` : "");
+    renderCatalog();
   } finally { busy(btn, false); }
+}
+
+function setupMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const b = $("#n-mic");
+  if (!SR || !b) return;
+  b.hidden = false;
+  b.addEventListener("click", () => {
+    const r = new SR(); r.lang = "ko-KR"; r.interimResults = false;
+    b.disabled = true; b.textContent = "듣는 중… 말씀하세요";
+    r.onresult = e => { const t = e.results[0][0].transcript; $("#n-text").value = ($("#n-text").value + " " + t).trim(); flowMatch(); };
+    r.onend = () => { b.disabled = false; b.textContent = "말로 적기"; };
+    r.onerror = e => toast("음성 인식을 쓰지 못했습니다(" + e.error + "). 글로 적어 주세요.", true);
+    r.start();
+  });
+}
+
+function lookupRows() {
+  const rows = [];
+  for (const st of S.catalog.filter(c => FLOW.sel.has(c.id)))
+    st.rows.forEach((r, i) => rows.push({ where: `${st.work} · ${st.step}`, first: i === 0, n: st.rows.length, situation: r.situation, code: r.code, src: st.src }));
+  const have = new Set(rows.map(r => r.code));
+  const t = `${$("#n-work").value} ${$("#n-text").value}`;
+  for (const h of S.hazards) {
+    const w = h.words.find(x => x && t.includes(x));
+    if (w && !have.has(h.code)) { rows.push({ where: "작업 설명", first: true, n: 1, situation: `설명 속 '${w}'`, code: h.code, src: h.src }); have.add(h.code); }
+  }
+  return rows;
+}
+
+function renderLookup() {
+  const box = $("#flow-2");
+  const rows = lookupRows();
+  const law = FLOW.mode === "law";
+  const tb = el("table", { class: "t lookup" }, el("tr", {}, ["공종·단계", "위험요인", law ? "법령·규정 근거" : "감소대책(우선순위 순)"].map(h => el("th", {}, h))),
+    rows.map(r => {
+      const h = S.hazards.find(x => x.code === r.code);
+      const R = h ? h.L * h.S : 0;
+      return el("tr", {},
+        r.first ? el("td", { rowspan: r.n, class: "lk-where" }, r.where) : null,
+        el("td", {}, el("div", {}, r.situation), h ? el("div", { class: "small" }, el("span", { class: "tag " + (R >= S.kb.rules[0].value ? "bad" : R >= S.kb.rules[1].value ? "warn" : "ok") }, `${h.code} ${h.name}`), el("span", { class: "muted" }, ` 기본 ${h.L}×${h.S}=${R}`)) : el("span", { class: "tag warn" }, `${r.code}: 위험요인 목록에 없음`)),
+        el("td", {}, !h ? "-" : law
+          ? el("div", { class: "row small" }, el("span", {}, h.law || "-"), h.law ? el("button", { class: "small", onclick: e => toggleLaw(e.target, h.code) }, "법령 원문") : null, citeChips([h.src]))
+          : el("ul", { class: "lk-m" }, h.measures.map(m => [kindOf(m), m]).sort((x, y) => KIND_ORDER.indexOf(x[0]) - KIND_ORDER.indexOf(y[0])).map(([k, m]) => el("li", {}, kindTag(k), " ", m)))));
+    }));
+  box.replaceChildren(el("div", { class: "panel" },
+    el("div", { class: "row" }, el("h2", { style: { margin: 0, flex: 1 } }, "위험요인 조회"),
+      el("div", { class: "seg", role: "group", "aria-label": "보기 기준" },
+        el("button", { class: law ? "" : "on", "aria-pressed": !law, onclick: () => { FLOW.mode = "risk"; renderLookup(); } }, "위험 기준"),
+        el("button", { class: law ? "on" : "", "aria-pressed": law, onclick: () => { FLOW.mode = "law"; renderLookup(); } }, "법령 기준"))),
+    el("p", { class: "small muted" }, `고른 단계 ${FLOW.sel.size}개와 작업 설명에서 찾은 위험 상황 ${rows.length}건입니다. 가능성×중대성은 목록의 기본값이고, 높이·인원·아차사고 반영은 위험성평가에서 합니다.`),
+    rows.length ? el("div", { class: "tbl-scroll" }, tb) : el("div", { class: "empty" }, "고른 단계가 없습니다. 1단계에서 작업 단계를 고르거나 작업 설명을 적어 주세요."),
+    el("div", { class: "row", style: { marginTop: "12px" } }, el("button", { onclick: () => flowGo(1) }, "← 작업 고르기"), el("span", { style: { flex: 1 } }),
+      el("button", { id: "to-tbm", class: "primary", disabled: !rows.length, onclick: async e => { busy(e.target, true, "평가 초안 만드는 중"); try { await flowCreate(); flowGo(3); } finally { busy(e.target, false); } } }, "TBM 일지로"),
+      el("button", { disabled: !rows.length, onclick: async e => { busy(e.target, true, "평가 만드는 중"); try { await flowCreate(); flowGo(4); } finally { busy(e.target, false); } } }, "위험성평가로"))));
+}
+
+function kindOf(t) {  // 서버(assess.kind_of)와 같은 규칙: 조회 화면에서만 씀
+  const R = [["공학적", /방호|덮개|환기|칸막이|라바콘|차단봉|방염포|잠금|차단 후|떨어짐 방지|난간|국소배기/], ["관리적", /금지/],
+    ["보호구", /착용|보호구|마스크|보안경|보호안경|안전화|안전모/], ["제거", /제거|없애|운영시간 외|나눠 운반/], ["대체", /대차|고소작업대|작업발판|A형 사다리|바꿔/]];
+  for (const [k, rx] of R) if (rx.test(t)) return k;
+  return "관리적";
+}
+
+async function flowCreate() {
+  const sig = flowSig();
+  if (FLOW.aid && FLOW.sig === sig) return;
+  const i = flowInputs();
+  const a = await api("POST", "/api/assess", Object.assign(i, { photos: PHOTOS, use_weather: USEWX, steps: [...FLOW.sel] }));
+  FLOW.aid = a.id; FLOW.sig = sig;
+  await load();
+}
+
+async function renderTBMSheet() {
+  const box = $("#flow-3");
+  const r = await api("GET", `/api/assess/${FLOW.aid}/tbm`);
+  const sh = r.sheet;
+  let lines = r.lines;
+  const ol = el("ol", { class: "a4-lines" }, lines.map(l => el("li", {}, l)));
+  const mode = el("span", { class: "small muted" }, "규칙 문안");
+  const sign = el("tbody");
+  const drawSign = () => sign.replaceChildren(...Array.from({ length: FLOW.n }, (_, k) => el("tr", {}, el("td", {}, k + 1), el("td", {}), el("td", {}, "양호 / 이상"), el("td", {}, "착용 / 미착용"), el("td", {}))));
+  drawSign();
+  const n = el("input", { type: "number", min: 3, max: 30, value: FLOW.n, style: { width: "70px" }, "aria-label": "참석자 줄 수", onchange: e => { FLOW.n = Math.max(3, Math.min(30, +e.target.value || 8)); drawSign(); } });
+  const aiBtn = el("button", { class: "small", onclick: async () => {
+    busy(aiBtn, true, "문안 쓰는 중");
+    try { const x = await api("POST", `/api/assess/${FLOW.aid}/tbm/ai`); lines = x.lines; ol.replaceChildren(...lines.map(l => el("li", {}, l))); mode.textContent = x.mode + (x.dropped ? " · " + x.dropped : ""); }
+    finally { busy(aiBtn, false); }
+  } }, S.llm ? "AI로 말하기 쉽게 다시 쓰기" : "규칙 문안(모델 미연결)");
+  box.replaceChildren(
+    el("div", { class: "panel no-print" }, el("div", { class: "row" }, el("h2", { style: { margin: 0, flex: 1 } }, "작업 전 안전점검회의(TBM) 일지"),
+      el("span", { class: "small muted" }, "참석자 줄"), n, aiBtn, mode),
+      el("p", { class: "small muted" }, "A4 한 장으로 인쇄해 현장에서 읽고 서명받습니다. 위험요인은 확인된 것만, 위험성 높은 순서로 넣었습니다. 회의에서 새로 나온 위험은 4단계 위험성평가에 더하세요."),
+      el("div", { class: "row" }, el("button", { class: "primary", onclick: () => { document.body.classList.add("print-a4"); window.print(); setTimeout(() => document.body.classList.remove("print-a4"), 500); } }, "인쇄(A4)"),
+        exportButtons(`/api/assess/${FLOW.aid}/tbm`, () => ({ n: FLOW.n, lines })), el("span", { style: { flex: 1 } }),
+        el("button", { onclick: () => flowGo(2) }, "← 위험요인 조회"), el("button", { class: "primary", id: "to-assess", onclick: () => flowGo(4) }, "위험성평가로"))),
+    el("div", { class: "a4", id: "tbm-a4" },
+      el("h1", {}, "작업 전 안전점검회의(TBM) 일지"),
+      el("table", { class: "a4-t" }, el("tr", {}, el("th", {}, "일시"), el("td", {}, sh.date + "   :"), el("th", {}, "시설"), el("td", {}, sh.fac || "")),
+        el("tr", {}, el("th", {}, "작업"), el("td", {}, sh.work), el("th", {}, "작업 책임자"), el("td", {}))),
+      sh.steps.length ? el("div", { class: "a4-chips" }, el("b", {}, "오늘 작업 "), sh.steps.map(x => el("span", { class: "chip" }, x))) : null,
+      el("h2", {}, "위험요인과 대책"),
+      el("table", { class: "a4-t" }, el("tr", {}, ["번", "위험요인 · 위험 상황", "위험성", "대책(우선순위 순)"].map(h => el("th", {}, h))),
+        sh.rows.map((x, k) => el("tr", {}, el("td", {}, k + 1), el("td", {}, el("b", {}, x.name), x.situations.map(s => el("div", { class: "small" }, s))),
+          el("td", { class: "c" }, el("span", { class: "risk sm " + x.level }, x.risk)), el("td", {}, x.measures.map(m => el("div", {}, kindTag(m.kind), " ", m.text)))))),
+      el("h2", {}, "전달 내용"), ol,
+      el("h2", {}, "참석자 확인"),
+      el("table", { class: "a4-t sign" }, el("thead", {}, el("tr", {}, ["번", "성명", "건강 상태", "보호구", "서명"].map(h => el("th", {}, h)))), sign),
+      r.basis ? el("p", { class: "small muted" }, `※ 근거: ${r.basis.reg} ${r.basis.label}(${r.basis.title})`) : null));
+}
+
+async function flowGo(n) {
+  if (n >= 3 && !FLOW.aid) { toast("먼저 위험요인을 조회해 평가 초안을 만드세요", true); n = FLOW.sel.size || $("#n-text").value ? 2 : 1; }
+  FLOW.step = n;
+  for (let i = 1; i <= 4; i++) $(`#flow-${i}`).hidden = i !== n;
+  $$("#flow-steps button").forEach(b => { const s = +b.dataset.s; b.classList.toggle("on", s === n); b.classList.toggle("done", s < n); b.disabled = s >= 3 && !FLOW.aid; b.setAttribute("aria-current", s === n ? "step" : "false"); });
+  if (n === 1) renderCatalog();
+  if (n === 2) renderLookup();
+  if (n === 3) await renderTBMSheet();
+  if (n === 4) {
+    $("#flow-4").append($("#detail"));
+    CUR = await api("GET", `/api/assess/${FLOW.aid}`);
+    renderDetail();
+  }
+  if (GO) GO("new");
+  $("#flow-steps").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 // ------------------------------------------------------------ 목록·상세
@@ -139,6 +322,7 @@ function renderList() {
 
 async function openA(id) {
   CUR = await api("GET", `/api/assess/${id}`);
+  $("#tab-list").append($("#detail"));
   GO("list");
   renderDetail();
   $("#detail").scrollIntoView({ behavior: "smooth" });
@@ -187,6 +371,19 @@ function renderDetail() {
       } }, "평가 삭제"))),
     el("div", { id: "rep-edit" }));
 
+  const ls = a.method !== "3";
+  const todo = it => !it.confirmed || it.measures.some(m => !m.done && (!m.owner || !m.due));
+  if (a.items.length) box.append(el("div", { class: "panel method-bar" }, el("div", { class: "row" },
+    el("b", {}, "평가 기법"),
+    el("div", { class: "seg", role: "group", "aria-label": "평가 기법" },
+      el("button", { class: ls ? "on" : "", "aria-pressed": ls, onclick: () => ls || save({ method: "LS" }) }, "빈도·강도법(가능성×중대성)"),
+      el("button", { class: ls ? "" : "on", "aria-pressed": !ls, onclick: () => ls && save({ method: "3" }) }, "3단계 판단법(상·중·하)")),
+    el("span", { style: { flex: 1 } }),
+    el("label", { class: "small" }, el("input", { type: "checkbox", id: "only-todo", checked: ONLYTODO, onchange: e => { ONLYTODO = e.target.checked; renderDetail(); } }),
+      ` 미입력만 보기(${a.items.filter(todo).length})`)),
+    el("p", { class: "small muted", style: { margin: "6px 0 0" } }, ls
+      ? "가능성·중대성과 개선 후 값은 현장이 직접 판단해 고칩니다. 무사히가 넣은 값은 위험요인 목록·작업 조건·아차사고로 계산한 출발점입니다."
+      : "상·중·하는 현장이 직접 판단합니다. 처음 값은 빈도·강도 계산에서 옮겨 왔습니다(상은 작업 전 대책 완료).")));
   const openM = a.items.reduce((n, it) => n + it.measures.filter(m => !m.done && (!m.owner || !m.due)).length, 0);
   if (a.items.length) {
     const who = el("input", { type: "text", placeholder: "담당(예: 시설팀 김○○)", "aria-label": "한꺼번에 넣을 담당", style: { width: "200px" } });
@@ -203,21 +400,26 @@ function renderDetail() {
   }
 
   for (const it of a.items) {
-    const ls = k => el("select", { onchange: e => save({ items: [{ code: it.code, [k]: +e.target.value }] }) }, [1, 2, 3].map(v => el("option", { value: v, selected: it[k] === v }, v)));
+    if (ONLYTODO && !todo(it)) continue;
+    const sel = (k, cur, label) => el("select", { "aria-label": label, onchange: e => save({ items: [{ code: it.code, [k]: +e.target.value }] }) },
+      [1, 2, 3].map(v => el("option", { value: v, selected: cur === v }, k.startsWith("grade") ? { 3: "상", 2: "중", 1: "하" }[v] : v)));
     box.append(el("div", { class: `hz ${it.level}${it.confirmed ? "" : " unconf"}` },
-      el("div", { class: "row" }, el("span", { class: "risk " + it.level }, it.R),
+      el("div", { class: "row" }, el("span", { class: "risk " + it.level }, ls ? it.R : { 3: "상", 2: "중", 1: "하" }[it.G]),
         el("div", { style: { flex: 1 } }, el("h3", {}, it.name), el("div", { class: "small muted" }, `${it.code} · ${it.type} · ${it.level_label} · 개선 후 ${it.R_after}`)),
-        el("span", { class: "ls small" }, "가능성 ", ls("L"), " 중대성 ", ls("S")),
-        el("span", { class: "tag " + (it.by === "낱말" ? "info" : it.by === "사진(모델)" ? "warn" : "gray") }, it.by)),
+        ls ? el("span", { class: "ls small" }, "가능성 ", sel("L", it.L, "가능성"), " 중대성 ", sel("S", it.S, "중대성"),
+          el("span", { class: "after" }, " 개선 후 ", sel("La_set", it.La, "개선 후 가능성"), "×", sel("Sa_set", it.Sa, "개선 후 중대성")))
+          : el("span", { class: "ls small" }, "위험성 ", sel("grade", it.G, "위험성 상중하"), el("span", { class: "after" }, " 개선 후 ", sel("grade_after", it.G_after, "개선 후 상중하"))),
+        el("span", { class: "tag " + (it.by === "낱말" || it.by === "작업 분류" ? "info" : it.by === "사진(모델)" ? "warn" : "gray") }, it.by)),
       !it.confirmed ? el("div", { class: "q" }, `사진에서 모델이 본 위험입니다: "${it.photo || it.quote}". 현장에서 확인한 뒤 평가표에 넣으세요. `,
         el("button", { class: "small primary", onclick: () => save({ items: [{ code: it.code, confirmed: true }] }) }, "확인함"),
         " ", el("button", { class: "small", onclick: async () => { CUR = await api("POST", `/api/assess/${a.id}/remove`, { code: it.code }); renderDetail(); } }, "아님(빼기)")) : null,
-      it.quote && it.by !== "사진(모델)" ? el("div", { class: "reason" }, `근거 문구: "${it.quote}"`) : null,
+      (it.steps || []).length ? el("div", { class: "reason" }, "작업 단계: ", it.steps.map(x => el("span", { class: "chip", title: x.situation, onclick: () => showSource(x.src) }, `${x.step} - ${x.situation}`))) : null,
+      it.quote && it.by !== "사진(모델)" && it.by !== "작업 분류" ? el("div", { class: "reason" }, `근거 문구: "${it.quote}"`) : null,
       it.photo && it.by !== "사진(모델)" ? el("div", { class: "reason" }, `사진에서도 확인(모델): ${it.photo}`) : null,
       it.reasons.map(r => el("div", { class: "reason" }, "· " + r.text, " ", r.src ? citeChips([r.src]) : null)),
       el("div", { style: { marginTop: "8px" } }, it.measures.map((m, i) => el("div", { class: "meas" + (m.done ? " done" : "") },
         el("input", { type: "checkbox", checked: m.done, onchange: e => save({ items: [{ code: it.code, measures: it.measures.map((_, j) => j === i ? { done: e.target.checked } : {}) }] }) }),
-        el("span", {}, m.text),
+        el("span", {}, kindTag(m.kind), " ", m.text),
         el("input", { type: "text", value: m.owner, placeholder: "담당", onchange: e => save({ items: [{ code: it.code, measures: it.measures.map((_, j) => j === i ? { owner: e.target.value } : {}) }] }) }),
         el("input", { type: "date", value: m.due, onchange: e => save({ items: [{ code: it.code, measures: it.measures.map((_, j) => j === i ? { due: e.target.value } : {}) }] }) })))),
       el("div", { class: "row small", style: { marginTop: "8px" } }, el("span", { class: "muted" }, "관련 기준: " + (it.law || "-")), basisChip(it.basis),
@@ -649,6 +851,10 @@ async function renderLog() {
 document.addEventListener("DOMContentLoaded", async () => {
   GO = setupTabs(id => { if (id === "log") renderLog(); if (id === "about") renderAbout(); });
   $("#n-run").addEventListener("click", runNew);
+  $("#n-next").addEventListener("click", () => flowGo(2));
+  $("#n-match").addEventListener("click", flowMatch);
+  $$("#flow-steps button").forEach(b => b.addEventListener("click", () => flowGo(+b.dataset.s)));
+  setupMic();
   $("#ask-btn").addEventListener("click", () => ask());
   $("#q").addEventListener("keydown", e => { if (e.key === "Enter") ask(); });
   $("#ask-ex").append(...EX.map(x => el("span", { class: "chip", onclick: () => ask(x) }, x)));

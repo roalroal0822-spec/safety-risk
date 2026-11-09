@@ -25,6 +25,7 @@ from kb import KB
 VERSION = "1.1.0"
 HERE = Path(__file__).resolve().parent
 SAMPLE = HERE / "sample_data"
+CATALOG_FILE = "작업 분류(모의).xlsx"
 IMG = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 
 cfg = Config(HERE, {"app_title": "무사히(현장 위험성평가 AI)", "port": 8105})
@@ -98,6 +99,10 @@ def learned():
 
 def reload():
     k = KB(KB_ROOT).load().learn(learned())
+    k.catalog_demo = False
+    if not k.catalog and (SAMPLE / CATALOG_FILE).exists():  # 기관 작업 분류가 없으면 시연용 분류로 채움(화면에 표시)
+        k.load_catalog_file(SAMPLE / CATALOG_FILE, "시연용 " + CATALOG_FILE)
+        k.catalog_demo = True
     k.incidents += [dict(i, codes=k.codes_in(i["text"])) for i in user_incidents()]
     STATE["kb"] = k
     return k
@@ -118,7 +123,7 @@ def save_all(items):
 def get_a(aid):
     for a in assessments():
         if a["id"] == aid:
-            return a
+            return assess.upgrade(a)
     raise HttpError(404, "평가를 찾지 못했습니다")
 
 
@@ -162,6 +167,8 @@ def state(req):
         "periodic": {"basis": k.basis["periodic"], "year": today[:4],
                      "tasks": [dict(t, **assess.task_status(k, t, items, today[:4])) for t in k.tasks]},
         "learned": learned(),
+        "catalog": [{"id": c["id"], "cat": c["cat"], "work": c["work"], "step": c["step"], "rows": c["rows"], "src": c["src"]} for c in k.catalog],
+        "catalog_demo": k.catalog_demo,
         "hazards": [{"code": h["code"], "name": h["name"], "type": h["type"], "L": h["L"], "S": h["S"], "words": h["words"], "learned": h.get("learned", []),
                      "measures": h["measures"], "law": h["law"], "src": h["src"]} for h in k.hazards.values()],
         "assessments": rows,
@@ -179,6 +186,9 @@ def create(req):
     b = req.json or {}
     work, k1 = mask((b.get("work") or "").strip())
     text, k2 = mask((b.get("text") or "").strip())
+    steps = [str(x) for x in (b.get("steps") or [])][:40]
+    if not work and steps:
+        work = " · ".join(dict.fromkeys(st["work"] for st in (kb().step(x) for x in steps) if st))
     if not work and not text:
         raise HttpError(400, "작업 이름이나 작업 설명을 입력하세요")
     photos, names = [], []
@@ -204,13 +214,24 @@ def create(req):
     if wx and temp in (None, ""):
         temp = wx["feel"]
     a = assess.make(kb(), (b.get("fac") or "").strip(), (b.get("dept") or "").strip(), work, text, temp,
-                    llm if llm.enabled else None, photos, names)
+                    llm if llm.enabled else None, photos, names, steps)
     if wx:
         set_weather(a, wx)
     if k1 or k2:
         a["notes"].insert(0, f"작업 설명의 개인정보({', '.join(dict.fromkeys(k1 + k2))})를 ○○○로 가린 뒤 평가했습니다.")
     log("위험성평가 작성", f"{a['fac']} {a['work']}")
     return put_a(a)
+
+
+@app.post("/api/catalog/match")
+def catalog_match(req):
+    """말로 적은 작업 설명 → 작업 분류의 작업·단계(찾는 낱말로 고름)와 읽은 작업 조건."""
+    b = req.json or {}
+    text, _ = mask(" ".join(str(b.get(k) or "") for k in ("work", "text")).strip())
+    if not text:
+        raise HttpError(400, "작업 이름이나 설명을 먼저 적거나 말해 주세요")
+    k = kb()
+    return {"works": k.match_steps(text), "conditions": assess.conditions(text), "codes": k.codes_in(text)}
 
 
 @app.get("/api/assess/<aid>")
@@ -238,6 +259,12 @@ def update(req):
                     it[k] = v
         if "confirmed" in u:
             it["confirmed"] = bool(u["confirmed"])
+        for k, lo, hi in (("grade", 1, 3), ("grade_after", 1, 3), ("La_set", 1, 3), ("Sa_set", 1, 3)):
+            if k in u:
+                v = int(u[k]) if u[k] not in (None, "") else None
+                if v is not None and not lo <= v <= hi:
+                    raise HttpError(400, "값은 1~3입니다")
+                it[k] = v
         for i, mu in enumerate(u.get("measures") or []):
             if i < len(it["measures"]):
                 m = it["measures"][i]
@@ -247,6 +274,8 @@ def update(req):
                 for k in ("owner", "due"):
                     if k in mu:
                         m[k] = str(mu[k] or "")[:40]
+    if b.get("method") in ("LS", "3"):
+        a["method"] = b["method"]
     if b.get("status") in ("작성 중", "확정"):
         a["status"] = b["status"]
     if b.get("clear_reassess"):
@@ -324,8 +353,15 @@ def sample_photo(req):
 # ------------------------------------------------------------ 문서
 
 def _mlist(it):
-    return "\n".join(("[완료] " if m["done"] else "") + m["text"] + (f" ({m['owner']}" + (f", ~{m['due']}" if m["due"] else "") + ")" if m["owner"] else "")
+    return "\n".join(("[완료] " if m["done"] else "") + (f"[{m['kind']}] " if m.get("kind") else "") + m["text"] + (f" ({m['owner']}" + (f", ~{m['due']}" if m["due"] else "") + ")" if m["owner"] else "")
                      for m in it["measures"])
+
+
+GRADE = assess.GRADE
+
+
+def _steps_cell(it):
+    return "\n".join(f"{x['step']}: {x['situation']}" for x in it.get("steps") or []) or "-"
 
 
 def sheet_blocks(a):
@@ -337,11 +373,14 @@ def sheet_blocks(a):
     blocks = [("title", "위험성평가표"),
               ("table", ["시설", "부서", "작업", "평가일", "상태"], [[a["fac"], a["dept"], a["work"], a["created"], a["status"]]], [2, 2, 4, 2, 1]),
               ("p", f"작업 설명: {a['text']}"), ("p", f"읽은 작업 조건: {cd or '없음'}"),
-              ("p", f"판단 기준: 위험성 = 가능성(1~3) × 중대성(1~3). {a['rules']['high']} 이상은 작업 전 감소대책 완료, {a['rules']['mid']} 이상은 작업 중 관리."),
-              ("table", ["번호", "유해·위험요인", "재해 형태", "가능성", "중대성", "위험성", "판단", "감소대책(담당·기한)", "개선 후", "관련 기준"],
-               [[str(n), it["name"] + (" (사진 확인)" if it.get("photo") else ""), it["type"], it["L"], it["S"], it["R"], it["level_label"],
-                 _mlist(it), it["R_after"], _law_cell(it)]
-                for n, it in enumerate(items, 1)], [1, 4, 2, 1, 1, 1, 2, 7, 1, 4])]
+              ("p", f"판단 기준: 위험성 = 가능성(1~3) × 중대성(1~3). {a['rules']['high']} 이상은 작업 전 감소대책 완료, {a['rules']['mid']} 이상은 작업 중 관리."
+                    if a.get("method", "LS") == "LS" else "판단 기준(3단계 판단법): 상은 작업 전 감소대책 완료, 중은 작업 중 관리, 하는 현재 조치 유지. 값은 현장 담당자가 판단."),
+              ("p", "감소대책은 제거 → 대체 → 공학적 → 관리적 → 보호구 순서로 적었습니다."),
+              ("table", ["번호", "작업 단계", "유해·위험요인", "재해 형태", "가능성", "중대성", "위험성", "판단", "감소대책(담당·기한)", "개선 후", "관련 기준"],
+               [[str(n), _steps_cell(it), it["name"] + (" (사진 확인)" if it.get("photo") else ""), it["type"], it["L"], it["S"],
+                 it["R"] if a.get("method", "LS") == "LS" else GRADE[it["G"]], it["level_label"],
+                 _mlist(it), it["R_after"] if a.get("method", "LS") == "LS" else it["after_label"], _law_cell(it)]
+                for n, it in enumerate(items, 1)], [1, 3, 4, 2, 1, 1, 1, 2, 7, 1, 4])]
     reasons = [(it["name"], r) for it in items for r in it["reasons"]]
     if reasons:
         blocks += [("h2", "가능성·중대성 판단 이유")] + [("bullet", f"{n}: {r['text']}" + (f" [{r['src']['file']} {r['src']['loc']}]" if r.get("src") else "")) for n, r in reasons]
@@ -421,11 +460,14 @@ def export_sheet(req):
 def export_xlsx(req):
     a = get_a(req.params["aid"])
     items = [i for i in a["items"] if i["confirmed"]]
-    rows = [[n, i["name"], i["type"], i["L"], i["S"], i["R"], i["level_label"], _mlist(i), i["R_after"],
+    ls = a.get("method", "LS") == "LS"
+    rows = [[n, _steps_cell(i), i["name"], i["type"], i["L"], i["S"], i["R"] if ls else GRADE[i["G"]], i["level_label"], _mlist(i),
+             f"{i['La']}×{i['Sa']}={i['R_after']}" if ls else i["after_label"],
              "; ".join(r["text"] for r in i["reasons"]), _law_cell(i)]
             for n, i in enumerate(items, 1)]
-    data = workbook([("위험성평가표", ["번호", "유해·위험요인", "재해 형태", "가능성", "중대성", "위험성", "판단", "감소대책(담당·기한)", "개선 후", "판단 이유", "관련 기준"],
-                      rows, [6, 30, 12, 8, 8, 8, 16, 50, 8, 50, 40])],
+    data = workbook([("위험성평가표", ["번호", "작업 단계·위험 상황", "유해·위험요인", "재해 형태", "가능성", "중대성", "위험성" if ls else "위험성(3단계)", "판단",
+                                   "감소대책(제거·대체·공학적·관리적·보호구 순, 담당·기한)", "개선 후", "판단 이유", "관련 기준"],
+                      rows, [6, 30, 30, 12, 8, 8, 8, 16, 50, 10, 50, 40])],
                     note=f"{a['fac']} · {a['work']} · 평가일 {a['created']} · {a['status']} · 작업 설명: {a['text']}")
     log("위험성평가표 엑셀", a["work"])
     return file_response(data, f"위험성평가표_{a['fac']}_{a['work'][:20]}.xlsx", XLSX)
@@ -480,26 +522,51 @@ def tbm_script(a, k):
     return lines
 
 
+def tbm_sheet(a):
+    """TBM 일지에 들어갈 오늘 작업(단계)과 위험요인·대책 표(위험성 높은 순, 확인된 것만)."""
+    items = [i for i in a["items"] if i["confirmed"]]
+    steps = a.get("steps") or []
+    rows = [{"code": i["code"], "name": i["name"], "level": i["level"], "risk": i["R"] if a.get("method", "LS") == "LS" else GRADE[i["G"]],
+             "situations": [f"{x['step']}: {x['situation']}" for x in i.get("steps") or []] or ([f'"{i["quote"]}"'] if i.get("quote") else []),
+             "measures": [{"text": m["text"], "kind": m.get("kind", "")} for m in i["measures"]]} for i in items]
+    return {"date": date.today().isoformat(), "fac": a["fac"], "dept": a["dept"], "work": a["work"],
+            "steps": [f"{x['work']} · {x['step']}" for x in steps], "rows": rows}
+
+
 @app.get("/api/assess/<aid>/tbm")
 def tbm(req):
     a = get_a(req.params["aid"])
-    return {"lines": tbm_script(a, kb()), "basis": kb().cite_topic(r"안전점검회의")}
+    return {"lines": tbm_script(a, kb()), "basis": kb().cite_topic(r"안전점검회의"), "sheet": tbm_sheet(a)}
 
 
 @app.post("/api/assess/<aid>/tbm")
 def tbm_doc(req):
     a = get_a(req.params["aid"])
-    blocks = [("title", "작업 전 안전점검회의(TBM) 기록"),
-              ("table", ["일시", "시설", "작업", "작업 책임자"], [[date.today().isoformat() + "  :", a["fac"], a["work"], ""]], [2, 2, 4, 2]),
-              ("h2", "전달 내용")] + [("bullet", l) for l in tbm_script(a, kb())] + [
-              ("h2", "참석자 확인"), ("table", ["번", "성명", "건강 상태", "보호구", "서명"], [[str(n), "", "양호 / 이상", "착용 / 미착용", ""] for n in range(1, 9)], [1, 3, 2, 2, 2])]
-    b = kb().cite_topic(r"안전점검회의")
-    if b:
-        blocks.append(("note", f"※ 근거: {b['reg']} {b['label']}({b['title']})"))
+    b = req.json or {}
+    try:
+        n = max(3, min(30, int(b.get("n") or 8)))
+    except (TypeError, ValueError):
+        raise HttpError(400, "참석자 줄 수는 숫자로 적어 주세요")
+    sh = tbm_sheet(a)
+    lines = [str(x)[:300] for x in b["lines"]][:15] if isinstance(b.get("lines"), list) and b["lines"] else tbm_script(a, kb())
+    blocks = [("title", "작업 전 안전점검회의(TBM) 일지"),
+              ("table", ["일시", "시설", "작업", "작업 책임자"], [[sh["date"] + "  :", a["fac"], a["work"], ""]], [2, 2, 4, 2])]
+    if sh["steps"]:
+        blocks.append(("p", "오늘 작업 단계: " + ", ".join(sh["steps"])))
+    if sh["rows"]:
+        blocks += [("h2", "위험요인과 대책"),
+                   ("table", ["번", "위험요인", "위험 상황", "위험성", "대책(우선순위 순)"],
+                    [[str(k), r["name"], "\n".join(r["situations"]) or "-", str(r["risk"]), "\n".join(f"[{m['kind']}] {m['text']}" for m in r["measures"])]
+                     for k, r in enumerate(sh["rows"], 1)], [1, 3, 4, 1, 6])]
+    blocks += [("h2", "전달 내용")] + [("bullet", l) for l in lines] + [
+              ("h2", "참석자 확인"), ("table", ["번", "성명", "건강 상태", "보호구", "서명"], [[str(k), "", "양호 / 이상", "착용 / 미착용", ""] for k in range(1, n + 1)], [1, 3, 2, 2, 2])]
+    bs = kb().cite_topic(r"안전점검회의")
+    if bs:
+        blocks.append(("note", f"※ 근거: {bs['reg']} {bs['label']}({bs['title']})"))
     fmt = req.query.get("fmt", "hwpx")
     data, ctype = export(blocks, fmt)
-    log("TBM 기록지 만들기", a["work"])
-    return file_response(data, f"TBM기록_{a['work'][:20]}.{fmt}", ctype)
+    log("TBM 일지 만들기", a["work"])
+    return file_response(data, f"TBM일지_{a['work'][:20]}.{fmt}", ctype)
 
 
 def _law_cell(it):

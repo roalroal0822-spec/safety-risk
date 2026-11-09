@@ -1,4 +1,4 @@
-"""기관 자료 읽기: 위험요인 목록, 안전보건관리규정, 정기 평가 대상 작업, 아차사고 기록.
+"""기관 자료 읽기: 위험요인 목록, 안전보건관리규정, 정기 평가 대상 작업, 아차사고 기록, 작업 분류.
 
 표는 열 이름으로 알아본다. 판단 기준값(위험성 6 이상·3 이상, 폭염 33℃·35℃ 등)은 규정 조문에서 읽고,
 규정에 없으면 기본값을 쓴다. 모든 항목에 원문 위치를 붙인다.
@@ -6,7 +6,7 @@
 import re
 
 from core import regparse
-from core.loaders import load_folder
+from core.loaders import load_bytes, load_folder
 
 # 위험요인 코드 → 규정에서 관련 조문을 찾는 낱말
 REG_TOPIC = {"H01": r"높은 곳", "H03": r"전기", "H05": r"밀폐", "H06": r"약품", "H07": r"폭염", "H09": r"화기"}
@@ -31,6 +31,7 @@ class KB:
         self.root = root
         self.hazards = {}  # 코드 → {...}
         self.tasks = []
+        self.catalog = []  # 작업 단계: {id, cat, work, step, rows:[{situation, code}], words, src}
         self.incidents = []
         self.reg = None
         self.reg_doc = None
@@ -95,6 +96,33 @@ class KB:
                 n += 1
             self.files.append({"file": doc.relpath, "kind": "아차사고 기록", "rows": n})
             return
+        c_cat, c_step, c_sit, c_hc = _col(h, r"^분류$|대분류|공종"), _col(h, r"^단계$|세부작업"), _col(h, r"위험상황"), _col(h, r"위험요인코드")
+        c_w = _col(h, r"^작업$|작업명|중분류")
+        if None not in (c_cat, c_step, c_hc, c_w):
+            c_words = _col(h, r"찾는낱말|키워드")
+            by, n = {(s["work"], s["step"]): s for s in self.catalog}, 0
+            words = {}
+            for row, loc in zip(t["rows"], locs):
+                g = lambda i: str(row[i]).strip() if i is not None and i < len(row) else ""  # noqa: E731
+                if not (g(c_w) and g(c_step)):
+                    continue
+                key = (g(c_w), g(c_step))
+                st = by.get(key)
+                if not st:
+                    st = by[key] = {"id": f"S{len(self.catalog) + 1:02d}", "cat": g(c_cat) or "기타", "work": key[0], "step": key[1],
+                                    "rows": [], "src": {"file": doc.relpath, "loc": loc, "quote": f"{key[0]} · {key[1]}"}}
+                    self.catalog.append(st)
+                codes = [c.strip() for c in re.split(r"[|,;/ ]+", g(c_hc)) if c.strip()]
+                for c in codes or [""]:
+                    st["rows"].append({"situation": g(c_sit), "code": c})
+                for w in g(c_words).split("|"):
+                    if w.strip():
+                        words.setdefault(key[0], []).append(w.strip())
+                n += 1
+            for st in self.catalog:
+                st["words"] = list(dict.fromkeys(words.get(st["work"], []) + st.get("words", [])))
+            self.files.append({"file": doc.relpath, "kind": "작업 분류", "rows": n})
+            return
         c_work, c_cycle = _col(h, r"^작업$|작업명"), _col(h, r"주기")
         if c_work is not None and c_cycle is not None:
             c_dept, c_fac = _col(h, r"부서"), _col(h, r"시설|장소")
@@ -117,6 +145,32 @@ class KB:
         for inc in self.incidents:
             inc["codes"] = self.codes_in(inc["text"])
         return self
+
+    def load_catalog_file(self, path, rel):
+        """기관 자료에 작업 분류가 없을 때 시연용 분류를 읽는다(화면에 '시연용 분류'로 표시)."""
+        doc = load_bytes(path.read_bytes(), rel)
+        for t in doc.tables:
+            self._table(doc, t)
+        return self
+
+    def match_steps(self, text):
+        """말로 적은 작업 설명에 작업의 찾는 낱말이 있으면 그 작업의 단계를 고른다.
+        맞은 낱말이 가장 많은 작업(같으면 설명 앞쪽에 나온 작업)을 주 작업으로 체크하고, 나머지는 '함께 볼 작업'으로만 보인다."""
+        t = text or ""
+        hit = {}
+        for st in self.catalog:
+            ws = [w for w in st.get("words", []) if w in t] or ([st["work"]] if st["work"] in t else [])
+            if ws:
+                h = hit.setdefault(st["work"], {"work": st["work"], "words": ws, "steps": [], "pos": min(t.index(w) for w in ws)})
+                h["steps"].append(st["id"])
+        out = sorted(hit.values(), key=lambda h: (-len(h["words"]), h["pos"]))
+        for i, h in enumerate(out):
+            h["primary"] = i == 0
+            h.pop("pos")
+        return out
+
+    def step(self, sid):
+        return next((s for s in self.catalog if s["id"] == sid), None)
 
     # ------------------------------------------------------------ 규정
     def article(self, topic):
@@ -165,6 +219,6 @@ class KB:
         return [c for c, h in self.hazards.items() if any(w in t for w in h["words"])]
 
     def summary(self):
-        return {"hazards": len(self.hazards), "tasks": len(self.tasks), "incidents": len(self.incidents),
+        return {"hazards": len(self.hazards), "tasks": len(self.tasks), "steps": len(self.catalog), "incidents": len(self.incidents),
                 "reg": self.reg_doc.relpath if self.reg_doc else "", "files": self.files, "warnings": self.warnings,
                 "rules": list(self.basis.values())}

@@ -5,7 +5,10 @@
 3) 아차사고: 같은 시설·위험요인의 최근 아차사고가 있으면 가능성을 1 올리고 그 기록을 근거로 단다.
 4) 모델(선택): 설명에서 낱말로 못 찾은 위험요인을 제안받되, 목록에 있는 코드이고 근거 문구가 설명에 실제로 있어야 넣는다.
    사진은 모델이 본 위험요인을 '현장 확인 필요'로만 넣고, 담당자가 확인해야 평가표에 들어간다.
+5) 작업 분류: 화면에서 체크한 작업 단계의 위험 상황을 위험요인으로 넣는다(단계·위험 상황을 근거로 표시).
 판단 기준(위험성 6 이상·3 이상)은 기관 규정 조문에서 읽는다.
+감소대책은 제거 → 대체 → 공학적 → 관리적 → 보호구 순서(위험성 감소 우선순위)로 분류해 정렬한다.
+평가 기법은 빈도·강도법(가능성×중대성, 기본)과 3단계 판단법(상·중·하) 중에서 고르며, 값은 현장이 직접 판단해 고친다.
 """
 import re
 import uuid
@@ -53,6 +56,40 @@ def _quote(text, words):
     return "", ""
 
 
+KINDS = ["제거", "대체", "공학적", "관리적", "보호구"]
+RX_KIND = [("공학적", r"방호|덮개|환기|칸막이|라바콘|차단봉|방염포|잠금|차단 후|떨어짐 방지|난간|국소배기"), ("관리적", r"금지"),
+           ("보호구", r"착용|보호구|마스크|보안경|보호안경|안전화|안전모"),
+           ("제거", r"제거|없애|운영시간 외|나눠 운반"), ("대체", r"대차|고소작업대|작업발판|A형 사다리|바꿔")]
+
+
+def kind_of(text):
+    """감소대책 문장을 위험성 감소 우선순위(제거·대체·공학적·관리적·보호구)로 나눈다. 문장 속 낱말 규칙으로만 정한다."""
+    for k, rx in RX_KIND:
+        if re.search(rx, text or ""):
+            return k
+    return "관리적"
+
+
+def _sort_measures(ms):
+    for m in ms:
+        m.setdefault("kind", kind_of(m["text"]))
+    ms.sort(key=lambda m: KINDS.index(m["kind"]) if m["kind"] in KINDS else 3)
+    return ms
+
+
+def upgrade(a):
+    """예전에 저장한 평가에 새 칸(감소대책 분류, 평가 기법, 작업 단계)을 채운다."""
+    a.setdefault("method", "LS")
+    a.setdefault("steps", [])
+    for it in a["items"]:
+        _sort_measures(it["measures"])
+        it.setdefault("steps", [])
+    return a
+
+
+GRADE = {3: "상", 2: "중", 1: "하"}
+
+
 def level(kb, r):
     if r >= kb.values["high"]:
         return "bad", "작업 전 대책 완료 필요"
@@ -65,7 +102,8 @@ def _item(kb, code, by, quote="", word=""):
     h = kb.hazards[code]
     return {"code": code, "name": h["name"], "type": h["type"], "L0": h["L"], "S0": h["S"], "L": h["L"], "S": h["S"],
             "reasons": [], "by": by, "quote": quote, "word": word, "confirmed": by != "사진(모델)",
-            "measures": [{"text": m, "done": False, "owner": "", "due": "", "completed": ""} for m in h["measures"]],
+            "measures": _sort_measures([{"text": m, "done": False, "owner": "", "due": "", "completed": ""} for m in h["measures"]]),
+            "steps": [],
             "law": h["law"], "basis": kb.cite_topic(REG_TOPIC[code]) if code in REG_TOPIC else None, "src": h["src"]}
 
 
@@ -106,14 +144,24 @@ def rate(kb, it, cond, fac, work, on):
     _score(kb, it)
 
 
-def _score(kb, it):
+def _score(kb, it, method="LS"):
     it["R"] = it["L"] * it["S"]
-    it["level"], it["level_label"] = level(kb, it["R"])
-    # 감소대책을 모두 하면 가능성이 1로 내려간다고 보고 개선 후 위험성을 계산(중대성은 그대로)
     done = all(m["done"] for m in it["measures"]) if it["measures"] else False
-    it["R_after"] = 1 * it["S"]
-    it["after_level"], it["after_label"] = level(kb, it["R_after"])
     it["all_done"] = done
+    if method == "3":
+        # 3단계 판단법: 담당자가 고른 상·중·하(고르기 전에는 빈도·강도 값에서 옮김). 상은 작업 전 대책 완료.
+        g = it.get("grade") or (3 if it["R"] >= kb.values["high"] else 2 if it["R"] >= kb.values["mid"] else 1)
+        ga = it.get("grade_after") or 1
+        it["G"], it["G_after"] = g, ga
+        it["level"], it["level_label"] = {3: ("bad", "상: 작업 전 대책 완료 필요"), 2: ("warn", "중: 작업 중 관리"), 1: ("ok", "하: 현재 조치 유지")}[g]
+        it["R_after"] = GRADE[ga]
+        it["after_level"], it["after_label"] = {3: "bad", 2: "warn", 1: "ok"}[ga], GRADE[ga]
+        return
+    it["level"], it["level_label"] = level(kb, it["R"])
+    # 개선 후: 담당자가 고른 값이 있으면 그 값, 없으면 감소대책을 모두 하면 가능성이 1로 내려간다고 보고 계산(중대성은 그대로)
+    it["La"], it["Sa"] = it.get("La_set") or 1, it.get("Sa_set") or it["S"]
+    it["R_after"] = it["La"] * it["Sa"]
+    it["after_level"], it["after_label"] = level(kb, it["R_after"])
 
 
 def recent_incidents(kb, fac, work, code, on):
@@ -184,10 +232,11 @@ def photo_hazards(kb, photos_b64, llm):
 
 # ------------------------------------------------------------ 평가 만들기
 
-def make(kb, fac, dept, work, text, temp=None, llm=None, photos=None, photo_names=None):
+def make(kb, fac, dept, work, text, temp=None, llm=None, photos=None, photo_names=None, steps=None):
     full = ". ".join(x for x in (work, text) if x)
     cond = conditions(full, temp)
     items, have = [], set()
+    picked = [s for s in (kb.step(x) for x in (steps or [])) if s]
     for code, h in kb.hazards.items():
         q, w = _quote(full, h["words"])
         if code == "H07" and not w and cond.get("outdoor") and cond.get("temp", 0) >= kb.values["heat_rest"]:
@@ -197,6 +246,16 @@ def make(kb, fac, dept, work, text, temp=None, llm=None, photos=None, photo_name
         if w:
             items.append(_item(kb, code, "낱말", q, w))
             have.add(code)
+    for st in picked:
+        for r in st["rows"]:
+            if r["code"] not in kb.hazards:
+                continue
+            ex = next((i for i in items if i["code"] == r["code"]), None)
+            if not ex:
+                ex = _item(kb, r["code"], "작업 분류", f"{st['step']}: {r['situation']}")
+                items.append(ex)
+                have.add(r["code"])
+            ex["steps"].append({"id": st["id"], "work": st["work"], "step": st["step"], "situation": r["situation"], "src": st["src"]})
     notes = []
     engine = "규칙"
     if llm is not None and llm.enabled:
@@ -247,13 +306,15 @@ def make(kb, fac, dept, work, text, temp=None, llm=None, photos=None, photo_name
         "id": "R" + uuid.uuid4().hex[:6], "created": date.today().isoformat(), "fac": fac, "dept": dept, "work": work,
         "text": text, "conditions": cond, "items": items, "questions": questions, "permits": permits,
         "photos": photo_names or [], "engine": engine, "notes": notes, "reassess": [], "status": "작성 중",
-        "rules": {"high": kb.values["high"], "mid": kb.values["mid"]},
+        "rules": {"high": kb.values["high"], "mid": kb.values["mid"]}, "method": "LS",
+        "steps": [{"id": st["id"], "cat": st["cat"], "work": st["work"], "step": st["step"]} for st in picked],
     }
 
 
 def rescore(kb, a):
+    upgrade(a)
     for it in a["items"]:
-        _score(kb, it)
+        _score(kb, it, a["method"])
     a["items"].sort(key=lambda i: (-i["R"], i["code"]))
     return a
 

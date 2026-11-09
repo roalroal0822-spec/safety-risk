@@ -128,7 +128,28 @@ def checks(c):
     yield f"재난문자 → 수시평가 필요 {ap['added']}건(두 번 눌러도 한 번만)", ap["added"] > 0 and ap2["added"] == 0 and any(r.get("kind") == "재난문자" for r in rf2["reassess"])
     t2 = c.call("GET", f"/api/assess/{rf['id']}/tbm")["lines"]
     yield "TBM에 날씨·작업 중지·재난문자", any("체감온도" in x for x in t2) and any("특보가 풀린 뒤" in x for x in t2) and any("재난문자" in x for x in t2)
-    yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 5
+    yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 6
+    # 작업 고르기 → 위험요인 조회 → TBM 일지 → 위험성평가
+    st = c.call("GET", "/api/state")
+    yield f"작업 분류 {len(st['catalog'])}단계 읽음", len(st["catalog"]) >= 30 and any(f["kind"] == "작업 분류" for f in st["kb"]["files"])
+    mt = c.call("POST", "/api/catalog/match", {"text": "수영장 염소 약품 투입, 풀사이드 물기"})
+    main = next(w for w in mt["works"] if w["primary"])
+    yield "말로 미리 고르기: 염소 약품 → 약품 투입 작업 단계", "약품" in main["work"] and len(main["steps"]) >= 2
+    fa = c.call("POST", "/api/assess", {"fac": "종합체육센터", "text": "", "steps": main["steps"]})
+    codes = {i["code"] for i in fa["items"]}
+    yield "단계만 골라도 평가(작업 이름 채움·단계별 위험 상황)", fa["work"] and {"H06", "H08"} <= codes and all(i["steps"] for i in fa["items"] if i["by"] == "작업 분류")
+    yield "감소대책 우선순위(제거→대체→공학적→관리적→보호구)", all(
+        [m["kind"] for m in i["measures"]] == sorted((m["kind"] for m in i["measures"]), key=["제거", "대체", "공학적", "관리적", "보호구"].index) for i in fa["items"])
+    up = c.call("POST", f"/api/assess/{fa['id']}/update", {"items": [{"code": "H06", "La_set": 2, "Sa_set": 2}]})
+    h6 = next(i for i in up["items"] if i["code"] == "H06")
+    yield "개선 후 빈도·강도 직접 입력", h6["R_after"] == 4
+    m3 = c.call("POST", f"/api/assess/{fa['id']}/update", {"method": "3", "items": [{"code": "H06", "grade": 3}]})
+    h6 = next(i for i in m3["items"] if i["code"] == "H06")
+    yield "3단계 판단법: 상이면 작업 전 대책 완료", m3["method"] == "3" and h6["level"] == "bad" and not m3["stats"]["ready"]
+    tb = c.call("GET", f"/api/assess/{fa['id']}/tbm")
+    yield "TBM 일지: 오늘 작업 단계·위험요인과 대책", tb["sheet"]["steps"] and tb["sheet"]["rows"] and tb["sheet"]["rows"][0]["measures"][0]["kind"]
+    raw = c.call("POST", f"/api/assess/{fa['id']}/tbm?fmt=md", {"n": 12}, raw=True)
+    yield "TBM 일지 내려받기(참석자 12줄)", "| 12 |" in raw.decode("utf-8") and "위험요인과 대책" in raw.decode("utf-8")
     # 규칙 기반(모델 없음)에서도 새 기능이 동작
     br = c.call("GET", "/api/briefing")
     lv = {r["id"]: r for r in br["rows"]}

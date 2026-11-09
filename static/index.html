@@ -66,10 +66,17 @@
 <main>
   <section class="tab" id="tab-dash"></section>
   <section class="tab" id="tab-new" hidden>
+    <ol class="flow-steps" id="flow-steps" aria-label="위험성평가 순서">
+      <li><button data-s="1"><b>1</b><span>작업 고르기</span></button></li>
+      <li><button data-s="2"><b>2</b><span>위험요인 조회</span></button></li>
+      <li><button data-s="3"><b>3</b><span>작업 전 회의(TBM)</span></button></li>
+      <li><button data-s="4"><b>4</b><span>위험성평가</span></button></li>
+    </ol>
+    <div id="flow-1">
     <div class="panel">
       <h2>어떤 작업을 하나요?</h2>
       <p class="tagline">오늘도 당신이 무사히 돌아오도록.</p>
-      <p class="small muted">평소 말하듯 적으면 됩니다. 높이, 인원, 장비, 약품, 장소, 운영 중인지 같은 조건을 적을수록 정확해집니다.</p>
+      <p class="small muted">평소 말하듯 적거나 말하면, 아래 작업 분류에서 해당 작업 단계를 미리 골라 둡니다. 높이, 인원, 장비, 약품, 장소, 운영 중인지 같은 조건을 적을수록 정확해집니다.</p>
       <div class="row" style="margin-bottom:8px"><span class="small muted">정기 평가 대상 작업에서 고르기:</span><select id="task-pick"><option value="">직접 입력</option></select></div>
       <div class="grid3">
         <div><label class="f">시설</label><input id="n-fac" class="wide" placeholder="예: 종합체육센터"></div>
@@ -80,10 +87,16 @@
       <label class="f">작업</label><input id="n-work" class="wide" placeholder="예: 체육관 천장 조명(등기구) 교체">
       <label class="f">작업 설명</label>
       <textarea id="n-text" class="wide" rows="3" placeholder='예: "이동식 일자 사다리로 높이 4m 등기구 안정기 교체. 혼자 작업, 바닥 왁스 청소 직후"'></textarea>
+      <div class="row" style="margin-top:6px"><button class="small" id="n-mic" hidden>말로 적기</button><button class="small primary" id="n-match">설명으로 작업 단계 미리 고르기</button><span id="n-match-out" class="small muted"></span></div>
       <label class="f">현장 사진(선택, 최대 4장)</label>
       <div class="row"><input type="file" id="n-photo" accept=".png,.jpg,.jpeg" multiple><button class="small" id="n-sample-photo">시연용 사진 넣기</button><span id="n-photo-list" class="small muted"></span></div>
-      <div class="row" style="margin-top:14px"><button class="primary" id="n-run">위험성평가 만들기</button><button id="n-example">예시 채우기</button></div>
     </div>
+    <div class="panel" id="cat-box"></div>
+    <div class="panel flow-nav"><div class="row"><button id="n-example">예시 채우기</button><span style="flex:1"></span><button id="n-run" title="조회·회의 단계를 건너뛰고 평가표를 바로 만듭니다">바로 위험성평가 만들기</button><button class="primary" id="n-next">위험요인 조회</button></div></div>
+    </div>
+    <div id="flow-2" hidden></div>
+    <div id="flow-3" hidden></div>
+    <div id="flow-4" hidden></div>
   </section>
   <section class="tab" id="tab-list" hidden><div id="list-box"></div><div id="detail"></div></section>
   <section class="tab" id="tab-ask" hidden>
