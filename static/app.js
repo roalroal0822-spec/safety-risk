@@ -1,4 +1,9 @@
 "use strict";
+// 화면 조각을 넣을 때 빈 칸(null·false)은 건너뛴다(그대로 넣으면 "null" 글자가 보임)
+for (const m of ["append", "replaceChildren"]) {
+  const orig = Element.prototype[m];
+  Element.prototype[m] = function (...kids) { return orig.apply(this, kids.flat(Infinity).filter(k => k !== null && k !== undefined && k !== false)); };
+}
 let S = null, GO = null, CUR = null, PHOTOS = [], LASTINC = null, USEWX = false, MSGS = null, ONLYTODO = false;
 const LV = { bad: "작업 전 조치 완료", warn: "작업 중 관리", ok: "현재 조치 유지" };
 
@@ -412,7 +417,6 @@ function reportDetail(r) {
 
 // ------------------------------------------------------------ 안전 성과: 체계도·연간/월간/주간 실적·결재 대기·공종 담당·협력업체 DB
 const PF = { unit: "month", anchor: null, data: null, vend: null, openV: null, edit: false };
-const KIND_CLR = { "위험성평가 작성": "#12397a", "평가 승인": "#3a6fd8", "감소대책 완료": "#30a46c", "TBM 실시": "#7c5cd6", "사진 제보": "#e2860b", "제보 조치 완료": "#c9a24a", "아차사고 등록": "#e5484d", "아차사고 조치 완료": "#8b95a1" };
 const won = n => n >= 1e8 ? (n / 1e8).toFixed(1).replace(/\.0$/, "") + "억 원" : n >= 1e4 ? Math.round(n / 1e4).toLocaleString() + "만 원" : n.toLocaleString() + "원";
 function shiftAnchor(dir) {
   const d = new Date(PF.anchor + "T00:00:00");
@@ -449,16 +453,147 @@ function sysDiagram(p) {
       node("db", "안전 활동 DB", "평가·승인·감소대책·TBM·제보·조치·아차사고", `${p.total}건`, `${p.label} 활동`),
       node("db", "연간 · 월간 · 주간 성과", "아래 표와 엑셀로", `${p.measures.total ? Math.round(p.measures.done / p.measures.total * 100) : 0}%`, "감소대책 완료율")));
 }
+const GCLR = { "평가·결재": "#1f4e9c", "안전조치 완료": "#2a9d6a", "TBM·점검·교육": "#8a5cd0", "제보·아차사고": "#e08a1e" };
+const GNAMES = Object.keys(GCLR);
+const svgEl = (tag, attrs, ...kids) => { const e = document.createElementNS("http://www.w3.org/2000/svg", tag); for (const [k, v] of Object.entries(attrs || {})) if (v != null) e.setAttribute(k, v); kids.flat().forEach(k => k != null && e.append(k)); return e; };
+function kindGroup(p, k) { for (const [g, ks] of Object.entries(p.groups_def)) if (ks.includes(k)) return g; return GNAMES[0]; }
+function gLegend(vals) { return el("div", { class: "pf-legend small" }, GNAMES.map(g => el("span", {}, el("i", { style: { background: GCLR[g] } }), g, vals ? el("b", {}, ` ${vals[g]}`) : null))); }
+function tipBox(wrap) {
+  const tip = el("div", { class: "pf-tip", hidden: true });
+  wrap.append(tip);
+  return (html, x, y) => { if (html == null) { tip.hidden = true; return; } tip.innerHTML = html; tip.hidden = false;
+    const w = wrap.clientWidth; tip.style.left = Math.min(Math.max(x + 12, 0), w - tip.offsetWidth - 4) + "px"; tip.style.top = Math.max(y - tip.offsetHeight - 8, 0) + "px"; };
+}
+function cumChart(p) {
+  const W = 720, H = 250, L = 40, R = 110, T = 14, B = 28, n = p.cum.length;
+  const tot = p.cum.map(c => GNAMES.reduce((a, g) => a + c[g], 0));
+  const max = Math.max(4, ...tot), nice = Math.pow(10, Math.floor(Math.log10(max))), top = Math.ceil(max / nice) * nice;
+  const x = i => L + (n === 1 ? (W - L - R) / 2 : i * (W - L - R) / (n - 1)), y = v => T + (H - T - B) * (1 - v / top);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "pf-svg", role: "img", "aria-label": `${p.label} 안전 활동 누적: 총 ${tot[n - 1] || 0}건` });
+  for (let k = 0; k <= 4; k++) { const v = top * k / 4; svg.append(svgEl("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), class: "pf-grid" + (k ? "" : " base") }), svgEl("text", { x: L - 8, y: y(v) + 4, class: "pf-ax", "text-anchor": "end" }, String(Math.round(v)))); }
+  const step = Math.ceil(n / 12);
+  p.trend.forEach((t, i) => { if (i % step === 0 || i === n - 1) svg.append(svgEl("text", { x: x(i), y: H - 8, class: "pf-ax", "text-anchor": "middle" }, t.label)); });
+  const today = (S && S.today) || p.to, last = Math.max(0, p.trend.filter(t => t.from <= today).length - 1);  // 오늘 이후 구간은 그리지 않음
+  const cum = p.cum.slice(0, last + 1);
+  let base = cum.map(() => 0);
+  const ends = [];
+  GNAMES.forEach(g => {
+    const topv = cum.map((c, i) => base[i] + c[g]);
+    const pts = topv.map((v, i) => `${x(i)},${y(v)}`).join(" "), back = base.map((v, i) => `${x(i)},${y(v)}`).reverse().join(" ");
+    svg.append(svgEl("polygon", { points: pts + " " + back, fill: GCLR[g], "fill-opacity": .2 }), svgEl("polyline", { points: pts, fill: "none", stroke: GCLR[g], "stroke-width": 2, "stroke-linejoin": "round" }));
+    ends.push({ g, v: cum[last][g], y: y((topv[last] + base[last]) / 2) });
+    base = topv;
+  });
+  if (last < n - 1) svg.append(svgEl("text", { x: x(last) + 6, y: T + 10, class: "pf-ax" }, "오늘"), svgEl("line", { x1: x(last), x2: x(last), y1: T, y2: H - B, class: "pf-grid" }));
+  // 오른쪽 끝 직접 라벨(겹치지 않게 위아래로 밀어 냄)
+  ends.splice(0, ends.length, ...ends.filter(e => e.v > 0));
+  ends.sort((a, b) => a.y - b.y).forEach((e, i, arr) => { if (i && e.y - arr[i - 1].y < 13) e.y = arr[i - 1].y + 13; });
+  ends.forEach(e => svg.append(svgEl("text", { x: x(last) + 6, y: e.y + 4, class: "pf-end" }, `${e.g} ${e.v}`)));
+  const cross = svgEl("line", { y1: T, y2: H - B, class: "pf-cross", visibility: "hidden" });
+  svg.append(cross);
+  const wrap = el("div", { class: "pf-chart" }, svg);
+  const tip = tipBox(wrap);
+  svg.addEventListener("mousemove", e => {
+    const r = svg.getBoundingClientRect(), sx = (e.clientX - r.left) * W / r.width;
+    const i = Math.max(0, Math.min(last, Math.round((sx - L) / ((W - L - R) / Math.max(1, n - 1)))));
+    cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+    const c = p.cum[i];
+    tip(`<b>${p.trend[i].label}까지 누적 ${tot[i]}건</b>` + GNAMES.map(g => `<div><i style="background:${GCLR[g]}"></i>${g} <b>${c[g]}</b></div>`).join(""), (e.clientX - r.left), (e.clientY - r.top));
+  });
+  svg.addEventListener("mouseleave", () => { cross.setAttribute("visibility", "hidden"); tip(null); });
+  return wrap;
+}
+function donut(p) {
+  const tot = GNAMES.reduce((a, g) => a + p.groups[g], 0), R = 70, r = 46, C = 90;
+  const svg = svgEl("svg", { viewBox: "0 0 180 180", class: "pf-donut", role: "img", "aria-label": "활동 구성 " + GNAMES.map(g => `${g} ${p.groups[g]}건`).join(", ") });
+  if (!tot) svg.append(svgEl("circle", { cx: C, cy: C, r: (R + r) / 2, fill: "none", stroke: "var(--line)", "stroke-width": R - r }));
+  let a0 = -Math.PI / 2;
+  const wrap = el("div", { class: "pf-chart pf-donut-w" }, svg);
+  const tip = tipBox(wrap);
+  GNAMES.forEach(g => {
+    const v = p.groups[g]; if (!v) return;
+    const a1 = a0 + v / tot * Math.PI * 2, gap = tot === v ? 0 : 0.02;
+    const pt = (rad, a) => `${C + rad * Math.cos(a)},${C + rad * Math.sin(a)}`, large = a1 - a0 - gap > Math.PI ? 1 : 0;
+    const d = tot === v ? `M${C},${C - R}A${R},${R} 0 1 1 ${C - .01},${C - R}L${C - .01},${C - r}A${r},${r} 0 1 0 ${C},${C - r}Z`
+      : `M${pt(R, a0 + gap / 2)}A${R},${R} 0 ${large} 1 ${pt(R, a1 - gap / 2)}L${pt(r, a1 - gap / 2)}A${r},${r} 0 ${large} 0 ${pt(r, a0 + gap / 2)}Z`;
+    const path = svgEl("path", { d, fill: GCLR[g], class: "pf-seg" });
+    path.addEventListener("mousemove", e => { const b = wrap.getBoundingClientRect(); tip(`<b>${g}</b><div>${v}건 · ${Math.round(v / tot * 100)}%</div>`, e.clientX - b.left, e.clientY - b.top); });
+    path.addEventListener("mouseleave", () => tip(null));
+    svg.append(path); a0 = a1;
+  });
+  svg.append(svgEl("text", { x: C, y: C - 2, class: "pf-dn", "text-anchor": "middle" }, String(tot)), svgEl("text", { x: C, y: C + 18, class: "pf-ax", "text-anchor": "middle" }, "건"));
+  wrap.append(el("div", { class: "pf-dlist" }, GNAMES.map(g => el("div", {}, el("i", { style: { background: GCLR[g] } }), el("span", {}, g), el("b", {}, p.groups[g]), el("em", {}, tot ? Math.round(p.groups[g] / tot * 100) + "%" : "-")))));
+  return wrap;
+}
+function heatmap(p) {
+  const d0 = new Date(p.from + "T00:00:00"), d1 = new Date(p.to + "T00:00:00");
+  const start = new Date(d0); start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const days = [];
+  for (let d = new Date(start); d <= d1; d.setDate(d.getDate() + 1)) days.push(new Date(d));
+  const weeks = Math.ceil(days.length / 7), big = weeks <= 6;  // 월간·주간은 달력 모양(가로 요일), 연간은 잔디 모양(세로 요일)
+  const cs = big ? 44 : 12, gp = big ? 6 : 3, L = big ? 0 : 22, T = 16;
+  const W = big ? 7 * (cs + gp) : L + weeks * (cs + gp), H = big ? T + weeks * (cs + gp) : T + 7 * (cs + gp);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "pf-heat", style: `max-width:${big ? W * 1.3 : W * 1.6}px`, role: "img", "aria-label": `${p.label} 날짜별 안전 활동 건수` });
+  const z = n => String(n).padStart(2, "0"), iso = d => `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+  const lv = c => !c ? "var(--fill)" : c === 1 ? "#c9d8ef" : c === 2 ? "#8fb0de" : c <= 4 ? "#4f7fc4" : "#1f4e9c";
+  if (big) "월화수목금토일".split("").forEach((t, i) => svg.append(svgEl("text", { x: i * (cs + gp) + cs / 2, y: 11, class: "pf-ax", "text-anchor": "middle" }, t)));
+  else "월수금".split("").forEach((t, i) => svg.append(svgEl("text", { x: 0, y: T + (i * 2) * (cs + gp) + cs * .75, class: "pf-ax sm" }, t)));
+  const wrap = el("div", { class: "pf-chart pf-heat-w" }, svg);
+  const tip = tipBox(wrap);
+  let lastM = -1;
+  const today = (S && S.today) || p.to;
+  days.forEach((d, i) => {
+    const key = iso(d), wk = Math.floor(i / 7), dw = i % 7, inside = d >= d0 && d <= d1, future = key > today, c = p.daily[key] || 0;
+    if (!big && dw === 0 && d.getMonth() !== lastM && inside) { lastM = d.getMonth(); svg.append(svgEl("text", { x: L + wk * (cs + gp), y: 10, class: "pf-ax sm" }, `${d.getMonth() + 1}월`)); }
+    if (!inside || (future && !big)) return;
+    const cx = big ? dw * (cs + gp) : L + wk * (cs + gp), cy = big ? T + 4 + wk * (cs + gp) : T + dw * (cs + gp);
+    const r = svgEl("rect", { x: cx, y: cy, width: cs, height: cs, rx: big ? 8 : 3, fill: future ? "none" : lv(c), stroke: future ? "var(--line)" : null, "stroke-dasharray": future ? "3 3" : null, class: "pf-cell" });
+    if (!future) { r.addEventListener("mousemove", e => { const b = wrap.getBoundingClientRect(); tip(`<b>${key}</b><div>안전 활동 ${c}건</div>`, e.clientX - b.left, e.clientY - b.top); }); r.addEventListener("mouseleave", () => tip(null)); }
+    svg.append(r);
+    if (big) {
+      svg.append(svgEl("text", { x: cx + 6, y: cy + 14, class: "pf-cn" + (c >= 3 ? " inv" : "") }, String(d.getDate())));
+      if (c) svg.append(svgEl("text", { x: cx + cs - 6, y: cy + cs - 7, "text-anchor": "end", class: "pf-cc" + (c >= 3 ? " inv" : "") }, `${c}건`));
+    }
+  });
+  const active = Object.keys(p.daily).length;
+  wrap.append(el("div", { class: "pf-heat-leg small muted", style: { maxWidth: big ? W * 1.3 + "px" : "" } }, `활동한 날 ${active}일`, el("span", { style: { flex: 1 } }), "적음", [0, 1, 2, 3, 5].map(c => el("i", { style: { background: lv(c) } })), "많음"));
+  return wrap;
+}
+function recentFeed(p) {
+  if (!p.recent.length) return el("div", { class: "empty" }, "이 기간에 끝낸 안전조치가 없습니다.");
+  return el("ol", { class: "pf-feed" }, p.recent.map(x => el("li", {},
+    el("span", { class: "pf-fd" }, x.date.slice(5).replace("-", ".")), el("i", { style: { background: GCLR["안전조치 완료"] } }),
+    el("div", {}, el("div", { class: "pf-ft" }, x.title), el("div", { class: "small muted" }, [x.kind, x.fac, x.who].filter(Boolean).join(" · "), x.imported ? " · 가져온 실적" : "")))));
+}
+function importStrip(p) {
+  const file = el("input", { type: "file", id: "led-file", accept: ".xlsx,.csv", hidden: true, onchange: async e => {
+    const files = await readFiles([...e.target.files]); if (!files.length) return;
+    const r = await api("POST", "/api/activities/upload", { files }); r.added.forEach(a => toast(a.error ? `${a.name}: ${a.error}` : `${a.name}: 실적 ${a.rows}건을 가져왔습니다`, !!a.error)); renderPerf();
+  } });
+  return el("div", { class: "pf-import" },
+    el("span", { class: "small" }, el("b", {}, "기존 실적 대장"), " 엑셀(날짜·활동·시설·공종·담당·내용)로 관리하던 점검·교육·TBM·개선 실적도 함께 쌓습니다."),
+    p.import_files.map(f => el("span", { class: "chip" }, `${f.name} · ${f.rows}건`)),
+    el("span", { style: { flex: 1 } }),
+    el("label", { for: "led-file", class: "btn-like small", role: "button", tabindex: 0, onkeydown: e => { if (e.key === "Enter") file.click(); } }, "실적 대장 올리기"), file,
+    el("button", { class: "small", id: "led-sample", onclick: async () => { const r = await api("POST", "/api/activities/sample"); toast(`시연용 실적 ${r.added[0].rows}건을 가져왔습니다`); renderPerf(); } }, "시연 실적 넣기"),
+    p.import_files.length ? el("button", { class: "small", onclick: async () => { await api("DELETE", "/api/activities/import"); renderPerf(); } }, "가져온 실적 지우기") : null);
+}
 function trendChart(p) {
-  const max = Math.max(1, ...p.trend.map(t => Object.values(t.counts).reduce((a, b) => a + b, 0)));
-  return el("div", { class: "pf-trend", role: "img", "aria-label": `${p.label} 안전 활동 추이` },
-    p.trend.map(t => {
-      const tot = Object.values(t.counts).reduce((a, b) => a + b, 0);
-      return el("div", { class: "pf-col", title: `${t.label} (${t.from}~${t.to}) ` + Object.entries(t.counts).filter(x => x[1]).map(([k, v]) => `${k} ${v}`).join(", ") },
-        el("div", { class: "pf-n" }, tot || ""),
-        el("div", { class: "pf-stack", style: { height: `${tot / max * 100}%` } }, Object.entries(t.counts).filter(x => x[1]).map(([k, v]) => el("i", { style: { flex: v, background: KIND_CLR[k] } }))),
+  const tots = p.trend.map(t => Object.values(t.counts).reduce((a, b) => a + b, 0)), max = Math.max(1, ...tots);
+  const wrap = el("div", { class: "pf-chart" });
+  const tip = tipBox(wrap);
+  wrap.prepend(el("div", { class: "pf-trend", role: "img", "aria-label": `${p.label} 구간별 안전 활동` },
+    p.trend.map((t, i) => {
+      const gv = GNAMES.map(g => [g, p.groups_def[g].reduce((a, k) => a + (t.counts[k] || 0), 0)]);
+      const col = el("div", { class: "pf-col" },
+        el("div", { class: "pf-n" }, tots[i] || ""),
+        el("div", { class: "pf-stack", style: { height: `${tots[i] / max * 100}%` } }, gv.filter(x => x[1]).map(([g, v]) => el("i", { style: { flex: v, background: GCLR[g] } }))),
         el("div", { class: "pf-l" }, t.label));
-    }));
+      col.addEventListener("mousemove", e => { const b = wrap.getBoundingClientRect(); tip(`<b>${t.label} (${t.from.slice(5)}~${t.to.slice(5)}) ${tots[i]}건</b>` + gv.map(([g, v]) => `<div><i style="background:${GCLR[g]}"></i>${g} <b>${v}</b></div>`).join(""), e.clientX - b.left, e.clientY - b.top); });
+      col.addEventListener("mouseleave", () => tip(null));
+      return col;
+    })));
+  return wrap;
 }
 function ownerTable(p) {
   const c = p.cfg;
@@ -532,26 +667,32 @@ async function renderPerf() {
         el("button", { class: "small", "aria-label": "이전 기간", onclick: () => shiftAnchor(-1) }, "‹"), el("b", { class: "pf-label" }, p.label),
         el("button", { class: "small", "aria-label": "다음 기간", onclick: () => shiftAnchor(1) }, "›"),
         el("button", { onclick: () => download("/api/performance/xlsx", { unit: PF.unit, anchor: PF.anchor }) }, "엑셀")),
-      el("p", { class: "small muted" }, "안전 활동 DB는 따로 입력하지 않습니다. 위험성평가·결재·감소대책 완료·TBM 일지·사진 제보·조치·아차사고 기록에서 날짜별로 다시 셉니다(시연용 아차사고 4건은 모의자료)."),
+      el("p", { class: "small muted" }, "안전 활동 DB는 따로 입력하지 않습니다. 위험성평가·결재·감소대책 완료·TBM 일지·사진 제보·조치·아차사고 기록과 가져온 실적 대장에서 날짜별로 다시 셉니다(시연용 아차사고·실적 대장은 모의자료)."),
       el("div", { class: "kpis" },
         kpi("안전 활동", p.total + "건", `참여 ${p.people}명(실명)`),
         kpi("감소대책 완료율", md.total ? Math.round(md.done / md.total * 100) + "%" : "-", `${md.done}/${md.total}개 · 기간 안 평가`, md.total && md.done < md.total ? "warn" : ""),
         kpi("사진 제보 조치", `${rp.done}/${rp.total}건`, rp.avg_days != null ? `평균 ${rp.avg_days}일 만에 완료` : "완료된 제보 없음"),
         kpi("평가 승인", `${p.approval.approved}/${p.approval.total}건`, `결재 진행 ${p.approval.waiting}건`, p.approval.waiting ? "warn" : "")),
+      importStrip(p),
       el("div", { class: "pf-grid" },
-        el("div", {}, el("h3", {}, "추이"), trendChart(p),
-          el("div", { class: "pf-legend small" }, Object.entries(KIND_CLR).map(([k, c]) => el("span", {}, el("i", { style: { background: c } }), k)))),
-        el("div", {}, el("h3", {}, "활동별"), el("table", { class: "t pf-kind" }, Object.entries(p.by_kind).map(([k, n]) => el("tr", {}, el("td", {}, el("i", { class: "dot", style: { background: KIND_CLR[k] } }), k), el("td", {}, n + "건")))),
-          el("h3", {}, "시설별"), p.by_fac.length ? p.by_fac.slice(0, 6).map(([f, n]) => el("div", { class: "rp-bar" }, el("span", {}, f), el("i", { style: { width: `${n / maxF * 100}%` } }), el("b", {}, n))) : el("div", { class: "small muted" }, "기간 안 활동이 없습니다."),
-          p.by_cat.length ? [el("h3", {}, "공종별"), el("div", {}, p.by_cat.map(([c, n]) => el("span", { class: "chip" }, `${c} ${n}`)))] : null)),
+        el("div", {}, el("h3", {}, `안전조치 실적이 쌓이는 모습 · ${p.label} 누적`), cumChart(p), gLegend()),
+        el("div", {}, el("h3", {}, "활동 구성"), donut(p))),
+      el("h3", {}, "안전 활동 달력"), heatmap(p),
+      el("div", { class: "pf-grid" },
+        el("div", {}, el("h3", {}, PF.unit === "year" ? "월별 활동" : PF.unit === "month" ? "주별 활동" : "요일별 활동"), trendChart(p), gLegend(p.groups)),
+        el("div", {}, el("h3", {}, "최근 끝낸 안전조치"), recentFeed(p))),
+      el("div", { class: "pf-grid3" },
+        el("div", {}, el("h3", {}, "활동별"), el("table", { class: "t pf-kind" }, Object.entries(p.by_kind).map(([k, n]) => el("tr", {}, el("td", {}, el("i", { class: "dot", style: { background: GCLR[kindGroup(p, k)] } }), k), el("td", { class: "num" }, n + "건"))))),
+        el("div", {}, el("h3", {}, "시설별"), p.by_fac.length ? p.by_fac.slice(0, 7).map(([f, n]) => el("div", { class: "rp-bar" }, el("span", {}, f), el("i", { style: { width: `${n / maxF * 100}%` } }), el("b", {}, n))) : el("div", { class: "small muted" }, "기간 안 활동이 없습니다.")),
+        el("div", {}, el("h3", {}, "공종별"), p.by_cat.length ? (() => { const mc = Math.max(...p.by_cat.map(x => x[1])); return p.by_cat.slice(0, 8).map(([c, n]) => el("div", { class: "rp-bar" }, el("span", {}, c), el("i", { style: { width: `${n / mc * 100}%`, background: "#8a5cd0" } }), el("b", {}, n))); })() : el("div", { class: "small muted" }, "공종이 적힌 활동이 없습니다."))),
       p.rows.length ? el("details", { class: "pf-rows" }, el("summary", {}, `활동 기록 ${p.rows.length}건 보기`),
         el("div", { class: "tbl-scroll" }, el("table", { class: "t" }, el("tr", {}, ["날짜", "활동", "시설", "공종", "담당·제보자", "내용"].map(h => el("th", {}, h))),
-          p.rows.slice(0, 100).map(x => el("tr", {}, el("td", {}, x.date), el("td", {}, el("i", { class: "dot", style: { background: KIND_CLR[x.kind] } }), x.kind), el("td", {}, x.fac), el("td", {}, x.cat), el("td", {}, x.who), el("td", {}, x.title)))))) : null),
+          p.rows.slice(0, 100).map(x => el("tr", {}, el("td", {}, x.date), el("td", {}, el("i", { class: "dot", style: { background: GCLR[kindGroup(p, x.kind)] } }), x.kind), el("td", {}, x.fac), el("td", {}, x.cat), el("td", {}, x.who), el("td", {}, x.title, x.imported ? el("span", { class: "tag gray", style: { marginLeft: "6px" } }, "가져온 실적") : null)))))) : null),
     el("div", { class: "pf-two" },
       el("div", { class: "panel" }, el("h2", {}, "결재 대기"),
-        p.waiting.length ? el("table", { class: "t" }, el("tr", {}, ["단계", "작업", "처리할 사람", ""].map(h => el("th", {}, h))),
+        p.waiting.length ? el("div", { class: "tbl-scroll" }, el("table", { class: "t" }, el("tr", {}, ["단계", "작업", "처리할 사람", ""].map(h => el("th", {}, h))),
           p.waiting.map(x => el("tr", {}, el("td", {}, el("span", { class: "tag " + (x.stage === "반려" ? "bad" : "warn") }, x.stage)), el("td", {}, `${x.fac} · ${x.work}`), el("td", {}, x.who),
-            el("td", {}, el("button", { class: "small", onclick: () => openA(x.id) }, "열기"))))) : el("div", { class: "empty" }, "결재를 기다리는 평가가 없습니다.")),
+            el("td", {}, el("button", { class: "small", onclick: () => openA(x.id) }, "열기")))))) : el("div", { class: "empty" }, "결재를 기다리는 평가가 없습니다.")),
       el("div", { class: "panel" }, el("h2", {}, "공종별 담당자"), ownerTable(p))),
     vendorBox(v));
   window.scrollTo(0, keepY);

@@ -79,6 +79,8 @@ def run_once():
         got.append(("새 기능 · 협력업체 DB(영상 미수록)", "시연 보고서 3개에서 읽은 업체·작업", "7곳·11건", f"{vd['total']['vendors']}곳·{vd['total']['jobs']}건"))
         got.append(("새 기능 · 협력업체 DB(영상 미수록)", "위험 작업이 있는 업체(협의 대상)", "7곳", f"{vd['total']['risky']}곳"))
         py = c.call("GET", "/api/performance?unit=year&anchor=2026-11-09")
+        led = c.call("POST", "/api/activities/sample")["added"][0]["rows"]
+        got.append(("새 기능 · 안전 성과(영상 미수록)", "시연 실적 대장에서 가져온 활동", "260건", f"{led}건"))
         got.append(("새 기능 · 안전 성과(영상 미수록)", "2026년 아차사고 등록(모의 4건 + 시연 1건)", "5건", f"{py['by_kind']['아차사고 등록']}건"))
         m = c.call("GET", "/api/feeds/messages")
         got.append(("5. 긴급재난문자", "재난문자(예시 자료)", "2건", f"{len(m['items'])}건"))

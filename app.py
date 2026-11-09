@@ -105,7 +105,7 @@ def kb():
 
 def _copy_sample():
     for p in SAMPLE.rglob("*"):
-        if p.is_file() and "사진" not in p.parts and VENDOR_DIR not in p.parts:
+        if p.is_file() and "사진" not in p.parts and VENDOR_DIR not in p.parts and LEDGER_DIR not in p.parts:
             dst = KB_ROOT / p.relative_to(SAMPLE)
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(p, dst)
@@ -1254,6 +1254,7 @@ def report_samples(req):
 # ------------------------------------------------------------ 공종별 담당·결재(검토·합의·승인)
 
 VENDOR_DIR = "협력업체 보고서"
+LEDGER_DIR = "안전 활동 실적"
 DEMO_CFG = {
     "demo": True,
     "owners": [{"cat": "전기설비", "name": "김도현", "dept": "시설운영팀"}, {"cat": "기계설비", "name": "이서준", "dept": "시설운영팀"},
@@ -1333,9 +1334,54 @@ def approve(req):
 
 # ------------------------------------------------------------ 안전 활동 DB·성과
 
+def imported_acts():
+    return store.read("acts_import.json", {"files": [], "rows": []})
+
+
 def all_activities():
     k = kb()
-    return sdb.activities(assessments(), reports(), k.incidents, followups(), store.read_log("history.jsonl"))
+    acts = sdb.activities(assessments(), reports(), k.incidents, followups(), store.read_log("history.jsonl"))
+    return sorted(acts + imported_acts()["rows"], key=lambda x: x["date"], reverse=True)
+
+
+def _import_ledger(raw, name):
+    doc = load_bytes(raw, name)
+    rows = [] if doc.error else sdb.parse_activity_ledger(doc)
+    for r in rows:
+        r["title"], r["who"] = mask(r["title"])[0], mask(r["who"])[0]
+    d = imported_acts()
+    d["rows"] = [r for r in d["rows"] if not r["ref"].startswith(name + " ")] + rows
+    d["files"] = [f for f in d["files"] if f["name"] != name] + [{"name": name, "rows": len(rows), "at": date.today().isoformat()}]
+    store.write("acts_import.json", d)
+    log("안전 활동 실적 가져오기", f"{name} {len(rows)}건")
+    return {"name": name, "rows": len(rows), "error": doc.error or ("" if rows else "날짜·활동 열이 있는 표를 찾지 못했습니다")}
+
+
+@app.post("/api/activities/upload")
+def acts_upload(req):
+    files = (req.json or {}).get("files") or []
+    if not files:
+        raise HttpError(400, "올릴 파일이 없습니다")
+    out = []
+    for f in files[:5]:
+        name = Path(f.get("path") or f.get("name") or "").name
+        if Path(name).suffix.lower() not in (".xlsx", ".csv"):
+            raise HttpError(400, f"실적 대장은 엑셀(xlsx)이나 csv로 올려 주세요: {name}")
+        out.append(_import_ledger(base64.b64decode(f["b64"]), name))
+    return {"added": out, "files": imported_acts()["files"]}
+
+
+@app.post("/api/activities/sample")
+def acts_sample(req):
+    out = [_import_ledger(p.read_bytes(), p.name) for p in sorted((SAMPLE / LEDGER_DIR).glob("*.xlsx"))]
+    return {"added": out, "files": imported_acts()["files"]}
+
+
+@app.delete("/api/activities/import")
+def acts_clear(req):
+    store.write("acts_import.json", {"files": [], "rows": []})
+    log("가져온 안전 활동 실적 지움")
+    return {"files": []}
 
 
 @app.get("/api/performance")
@@ -1369,7 +1415,7 @@ def performance(req):
     rp = reports()
     k = kb()
     vj = vendor_jobs()
-    p.update(cfg=c, waiting=waiting, by_owner=sorted(by_owner.values(), key=lambda x: -x["total"]),
+    p.update(cfg=c, waiting=waiting, import_files=imported_acts()["files"], groups_def=sdb.GROUPS, by_owner=sorted(by_owner.values(), key=lambda x: -x["total"]),
              counts={"assess": len(items), "reports": len(rp), "reports_open": sum(1 for r in rp if r["status"] in ("접수", "확인", "조치 중")),
                      "incidents": len(k.incidents), "vendors": len({sdb.norm_vendor(j["vendor"]) for j in vj}), "vendor_jobs": len(vj)})
     return p

@@ -102,7 +102,41 @@ def activities(assessments, reports, incidents, followups, log):
     return sorted(out, key=lambda x: x["date"], reverse=True)
 
 
-KINDS = ["위험성평가 작성", "평가 승인", "감소대책 완료", "TBM 실시", "사진 제보", "제보 조치 완료", "아차사고 등록", "아차사고 조치 완료"]
+KINDS = ["위험성평가 작성", "평가 승인", "감소대책 완료", "TBM 실시", "안전점검·교육", "사진 제보", "제보 조치 완료", "아차사고 등록", "아차사고 조치 완료"]
+# 도표용 4묶음: 평가·결재 / 조치 완료 / 점검·교육(TBM) / 제보·아차사고
+GROUPS = {"평가·결재": ["위험성평가 작성", "평가 승인"], "안전조치 완료": ["감소대책 완료", "제보 조치 완료", "아차사고 조치 완료"],
+          "TBM·점검·교육": ["TBM 실시", "안전점검·교육"], "제보·아차사고": ["사진 제보", "아차사고 등록"]}
+GROUP_OF = {k: g for g, ks in GROUPS.items() for k in ks}
+
+
+def kind_from_text(t):
+    """기존 실적 대장의 '활동' 칸 → 활동 종류."""
+    t = str(t or "")
+    for pat, k in ((r"아차", "아차사고 등록"), (r"제보", "사진 제보"), (r"TBM|작업 ?전 ?(회의|점검회의)", "TBM 실시"),
+                   (r"승인", "평가 승인"), (r"위험성 ?평가", "위험성평가 작성"),
+                   (r"감소대책|개선|보수|교체|설치|조치", "감소대책 완료"), (r"점검|교육|훈련|순찰", "안전점검·교육")):
+        if re.search(pat, t):
+            return k
+    return "안전점검·교육"
+
+
+def parse_activity_ledger(doc):
+    """기존 안전 활동 실적 대장(표) → 활동 줄. 날짜·활동 열이 있어야 한다."""
+    out = []
+    for t in doc.tables:
+        h = t["header"]
+        cd, ck = _col(h, r"날짜|일자|실시일"), _col(h, r"활동|구분|종류")
+        if cd is None or ck is None:
+            continue
+        c = {k: _col(h, p) for k, p in (("fac", r"시설|장소"), ("cat", r"공종|분야"), ("who", r"담당|실시자|작성자"), ("title", r"내용|제목|비고"))}
+        for row, loc in zip(t["rows"], t.get("row_locs") or [""] * len(t["rows"])):
+            g = lambda i: str(row[i]).strip() if i is not None and i < len(row) else ""  # noqa: E731
+            d = _date(g(cd)) or (g(cd)[:10] if re.match(r"20\d{2}-\d{2}-\d{2}", g(cd)) else "")
+            if not d:
+                continue
+            out.append({"date": d, "kind": kind_from_text(g(ck)), "fac": g(c["fac"]), "cat": g(c["cat"]), "who": g(c["who"]),
+                        "title": g(c["title"]) or g(ck), "ref": f"{doc.relpath} {loc}", "imported": True})
+    return out
 
 
 def period_range(unit, anchor):
@@ -145,7 +179,18 @@ def performance(acts, assessments, reports, unit, anchor):
     rp = [r for r in reports if s.isoformat() <= r["at"] <= e.isoformat()]
     days = [(date.fromisoformat(r["done_at"][:10]) - date.fromisoformat(r["at"])).days for r in rp if r["status"] == "완료" and r.get("done_at")]
     appr = [a for a in assessments if s.isoformat() <= a["created"] <= e.isoformat()]
-    return {"unit": unit, "label": label, "from": s.isoformat(), "to": e.isoformat(), "total": len(inside), "by_kind": by_kind, "trend": trend,
+    groups = {g: sum(by_kind[k] for k in ks) for g, ks in GROUPS.items()}
+    run, cum = {g: 0 for g in GROUPS}, []
+    for t in trend:
+        for g, ks in GROUPS.items():
+            run[g] += sum(t["counts"][k] for k in ks)
+        cum.append(dict(run))
+    daily = {}
+    for x in inside:
+        daily[x["date"]] = daily.get(x["date"], 0) + 1
+    recent = [x for x in inside if GROUP_OF.get(x["kind"]) == "안전조치 완료"][:8]
+    return {"unit": unit, "label": label, "groups": groups, "cum": cum, "daily": daily, "recent": recent,
+            "imported": sum(1 for x in inside if x.get("imported")), "from": s.isoformat(), "to": e.isoformat(), "total": len(inside), "by_kind": by_kind, "trend": trend,
             "by_fac": sorted(by_fac.items(), key=lambda x: -x[1]), "by_cat": sorted(by_cat.items(), key=lambda x: -x[1]),
             "measures": {"total": len(ms), "done": sum(1 for m in ms if m["done"])},
             "reports": {"total": len(rp), "done": sum(1 for r in rp if r["status"] == "완료"), "avg_days": round(sum(days) / len(days), 1) if days else None},

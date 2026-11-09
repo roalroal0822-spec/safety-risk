@@ -128,7 +128,7 @@ def checks(c):
     yield f"재난문자 → 수시평가 필요 {ap['added']}건(두 번 눌러도 한 번만)", ap["added"] > 0 and ap2["added"] == 0 and any(r.get("kind") == "재난문자" for r in rf2["reassess"])
     t2 = c.call("GET", f"/api/assess/{rf['id']}/tbm")["lines"]
     yield "TBM에 날씨·작업 중지·재난문자", any("체감온도" in x for x in t2) and any("특보가 풀린 뒤" in x for x in t2) and any("재난문자" in x for x in t2)
-    yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 12
+    yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 13
     # 작업 고르기 → 위험요인 조회 → TBM 일지 → 위험성평가
     st = c.call("GET", "/api/state")
     yield f"작업 분류 {len(st['catalog'])}단계 읽음", len(st["catalog"]) >= 30 and any(f["kind"] == "작업 분류" for f in st["kb"]["files"])
@@ -251,6 +251,19 @@ def checks(c):
     yield "제보 처리 일수·결재 대기·공종별 실적", pm["reports"]["done"] >= 1 and pm["reports"]["avg_days"] is not None and any(w["id"] == eb["id"] for w in pm["waiting"]) is False and any(o["cat"] == "전기설비" and o["approved"] >= 1 for o in pm["by_owner"])
     yield "성과 엑셀", c.call("POST", "/api/performance/xlsx", {"unit": "year"}, raw=True)[:2] == b"PK"
     yield "기준일 형식 검사", c.status("GET", "/api/performance?unit=month&anchor=abc") == 400
+    # 기존 실적 대장 가져오기·도표 자료
+    before = c.call("GET", "/api/performance?unit=year&anchor=2026-11-09")
+    im = c.call("POST", "/api/activities/sample")
+    after = c.call("GET", "/api/performance?unit=year&anchor=2026-11-09")
+    yield "실적 대장 가져오기(260건) → 연간 활동에 더해짐", im["added"][0]["rows"] == 260 and after["total"] == before["total"] + 260 and after["imported"] == 260
+    yield "누적 도표 자료: 마지막 누적 = 묶음 합계", after["cum"][-1] == after["groups"] and sum(after["groups"].values()) == after["total"]
+    yield "달력 자료: 날짜별 건수 합 = 기간 활동 수", sum(after["daily"].values()) == after["total"]
+    c.call("POST", "/api/activities/sample")
+    yield "같은 대장 다시 넣어도 두 번 세지 않음", c.call("GET", "/api/performance?unit=year&anchor=2026-11-09")["total"] == after["total"]
+    bad2 = c.call("POST", "/api/activities/upload", {"files": [{"path": "x.csv", "b64": _b64.b64encode("a,b\n1,2".encode()).decode()}]})
+    yield "날짜·활동 열이 없는 대장은 이유 표시", bad2["added"][0]["rows"] == 0 and bad2["added"][0]["error"]
+    c.call("DELETE", "/api/activities/import")
+    yield "가져온 실적 지우기", c.call("GET", "/api/performance?unit=year&anchor=2026-11-09")["total"] == before["total"]
     # 협력업체 DB
     vd = c.call("POST", "/api/vendors/sample")
     hk = next((x for x in vd["vendors"] if "한결" in x["name"]), None)
