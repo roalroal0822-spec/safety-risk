@@ -41,10 +41,15 @@ def run_once():
         w = c.call("GET", "/api/feeds/weather")
         got.append(("1. 새 위험성평가 · 기상청", "체감온도(예시 자료)", "33.6℃", f"{w['feel']:g}℃"))
         got.append(("1. 새 위험성평가 · 기상청", "발표 중인 특보(예시 자료)", "폭염경보, 강풍주의보", ", ".join(x["kind"] + x["level"] for x in w["active"])))
-        a = c.call("POST", "/api/assess", WORK)
+        mt = c.call("POST", "/api/catalog/match", {"work": WORK["work"], "text": WORK["text"]})
+        main = next(w for w in mt["works"] if w["primary"])
+        got.append(("새 기능 · 작업 고르기", "설명으로 미리 고른 작업·단계", "조명(등기구) 교체 · 4단계", f"{main['work']} · {len(main['steps'])}단계"))
+        a = c.call("POST", "/api/assess", dict(WORK, steps=main["steps"]))
         by = {i["code"]: i for i in a["items"]}
-        got.append(("2. 평가 결과", "찾은 위험요인", "4개", f"{len(a['items'])}개"))
-        got.append(("2. 평가 결과", "판정", "작업 전 조치 필요", "작업 시작 가능" if a["stats"]["ready"] else "작업 전 조치 필요"))
+        tb = c.call("GET", f"/api/assess/{a['id']}/tbm")["sheet"]
+        got.append(("새 기능 · TBM 일지", "오늘 작업 단계·위험요인 줄", "4단계·5줄", f"{len(tb['steps'])}단계·{len(tb['rows'])}줄"))
+        got.append(("2. 위험성평가", "찾은 위험요인", "5개", f"{len(a['items'])}개"))
+        got.append(("2. 위험성평가", "판정", "작업 전 조치 필요", "작업 시작 가능" if a["stats"]["ready"] else "작업 전 조치 필요"))
         got.append(("3. 판단 이유", "떨어짐 위험성(가능성×중대성)", "3×3=9", f"{by['H01']['L']}×{by['H01']['S']}={by['H01']['R']}"))
         got.append(("3. 판단 이유", "떨어짐 판단 이유(높이·혼자·젖은 바닥·아차사고)", "4건", f"{len(by['H01']['reasons'])}건"))
         got.append(("3. 판단 이유", "판단 이유가 원본 기록(파일·행)으로 이어짐", "있음", "있음" if any(r.get("src") for r in by["H01"]["reasons"]) else "없음"))
@@ -61,6 +66,12 @@ def run_once():
         got.append(("아차사고 조치·결과보고", "분류한 위험요인", "떨어짐, 감전", ", ".join(h["name"].split()[-1] for h in v["hazards"])))
         pv = c.call("GET", f"/api/incidents/{iid}/preview")["blocks"]
         got.append(("아차사고 조치·결과보고", "산업재해조사표 대체 아님 안내", "있음", "있음" if any("산업재해조사표" in str(b[1]) for b in pv) else "없음"))
+        import base64
+        pic = (ROOT / "sample_data" / "사진" / "수영장_풀사이드.jpg").read_bytes()
+        rp = c.call("POST", "/api/reports", {"photo": {"name": "수영장_풀사이드.jpg", "b64": base64.b64encode(pic).decode()},
+                                             "text": "풀사이드 배수구 주변 물이 고여 미끄러움. 청소 호스가 바닥에 둔 채 있음"})
+        got.append(("새 기능 · 사진 제보", "사진 위치로 찾은 시설·촬영 시각", "종합체육센터 · 2026-11-09 07:42", f"{rp['fac']} · {rp['shot']}"))
+        got.append(("새 기능 · 사진 제보", "위험요인 후보", "미끄러운 바닥, 걸려 넘어짐", ", ".join({"H02": "미끄러운 바닥", "H13": "걸려 넘어짐"}.get(h["code"], h["code"]) for h in rp["hazards"])))
         m = c.call("GET", "/api/feeds/messages")
         got.append(("5. 긴급재난문자", "재난문자(예시 자료)", "2건", f"{len(m['items'])}건"))
         br = c.call("GET", "/api/briefing")
