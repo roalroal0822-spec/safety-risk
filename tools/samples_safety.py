@@ -197,40 +197,29 @@ def xlsx(path, sheet, header, rows, widths, note):
     wb.save(p)
 
 
-def picture(path):
-    """사진 판독 시연용 그림: 젖은 바닥 위 사다리에 혼자 올라가 천장 등기구를 만지는 모습."""
+DEMO_PHOTOS = Path(__file__).resolve().parent / "demo_photos"
+
+
+def demo_photo(kind):
+    """AI로 만든 실사풍 시연 사진(tools/demo_photos)을 키우고 아래에 'AI로 만든 시연용 이미지' 표시를 붙인다."""
     from PIL import Image, ImageDraw, ImageFont
-    W, H = 900, 640
-    im = Image.new("RGB", (W, H), (236, 238, 241))
-    d = ImageDraw.Draw(im)
-    d.rectangle([0, 0, W, 70], fill=(205, 208, 214))  # 천장
-    d.rectangle([380, 70, 560, 92], fill=(250, 250, 210), outline=(120, 120, 120), width=3)  # 등기구
-    d.line([470, 92, 470, 118], fill=(60, 60, 60), width=3)  # 늘어진 전선
-    d.rectangle([0, 520, W, H], fill=(196, 168, 128))  # 바닥
-    d.ellipse([230, 545, 640, 600], fill=(170, 200, 230))  # 물기
-    # 일자 사다리
-    d.line([420, 520, 470, 150], fill=(200, 140, 30), width=9)
-    d.line([500, 520, 540, 150], fill=(200, 140, 30), width=9)
-    for k in range(9):
-        y = 500 - k * 42
-        d.line([423 + (520 - y) * 50 / 370, y, 503 + (520 - y) * 40 / 370, y], fill=(200, 140, 30), width=6)
-    # 사람(최상단 근처, 안전모 없음)
-    d.ellipse([478, 108, 516, 146], fill=(240, 200, 170), outline=(80, 60, 40), width=2)
-    d.line([497, 146, 497, 230], fill=(40, 70, 140), width=10)
-    d.line([497, 160, 470, 100], fill=(40, 70, 140), width=7)
-    d.line([497, 230, 478, 290], fill=(30, 30, 30), width=8)
-    d.line([497, 230, 520, 290], fill=(30, 30, 30), width=8)
-    # 미끄럼 주의 표지
-    d.polygon([(700, 520), (760, 400), (820, 520)], fill=(250, 210, 0), outline=(40, 40, 40))
+    im = Image.open(DEMO_PHOTOS / f"{kind}.png").convert("RGB")
+    im = im.resize((im.width * 2, im.height * 2), Image.LANCZOS)
     try:
-        f = ImageFont.truetype("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 22)
+        f = ImageFont.truetype("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 26)
     except OSError:
         f = ImageFont.load_default()
-    d.text((712, 470), "미끄럼", fill=(0, 0, 0), font=f)
-    d.text((20, 606), "시연용 그림(실제 현장 사진 아님)", fill=(60, 60, 60), font=f)
+    d = ImageDraw.Draw(im, "RGBA")
+    d.rectangle([0, im.height - 48, im.width, im.height], fill=(0, 0, 0, 165))
+    d.text((16, im.height - 40), "AI로 만든 시연용 이미지(실제 현장 사진 아님)", fill=(255, 255, 255), font=f)
+    return im
+
+
+def picture(path):
+    """사진 판독 시연용: 체육관 천장 조명 교체(사다리 위 작업) 사진."""
     p = OUT / path
     p.parent.mkdir(parents=True, exist_ok=True)
-    im.save(p)
+    demo_photo("ladder").save(p, optimize=True)
 
 
 # 시설 위치(사진 촬영 위치로 시설을 찾는 데만 씀). 좌표·주소는 지어낸 값이다.
@@ -242,7 +231,7 @@ FACILITIES = [
     ("복지관", "서울 ○○구 ○○로 60(모의)", 37.6481, 127.0331, 150),
 ]
 
-# 사진 제보 시연용 그림: (파일, 시설, 촬영 시각, 그리기 함수 이름)
+# 사진 제보 시연용 사진: (파일, 시설, 촬영 시각, tools/demo_photos 사진 이름)
 REPORT_PICS = [("수영장_풀사이드.jpg", "종합체육센터", "2026:11:09 07:42:10", "pool"),
                ("주차장_진출입로.jpg", "공영주차장", "2026:11:08 18:05:33", "parking")]
 
@@ -268,7 +257,7 @@ def _exif_jpeg(im, path, fac, when):
         m = int((v - d) * 60)
         return (float(d), float(m), round(((v - d) * 60 - m) * 60, 2))
     ex = Image.Exif()
-    ex[0x010F], ex[0x0110] = "DEMO", "Illustration"
+    ex[0x010F], ex[0x0110] = "DEMO", "AI-generated demo image"
     ex[0x8769] = {0x9003: when}
     ex[0x8825] = {1: "N", 2: dms(la), 3: "E", 4: dms(lo)}
     p = OUT / path
@@ -277,41 +266,8 @@ def _exif_jpeg(im, path, fac, when):
 
 
 def report_pictures():
-    from PIL import Image, ImageDraw, ImageFont
-    try:
-        f = ImageFont.truetype("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 22)
-    except OSError:
-        f = ImageFont.load_default()
     for name, fac, when, kind in REPORT_PICS:
-        W, H = 960, 640
-        im = Image.new("RGB", (W, H), (226, 236, 242))
-        d = ImageDraw.Draw(im)
-        if kind == "pool":
-            d.rectangle([0, 0, W, 300], fill=(214, 226, 233))
-            d.rectangle([0, 300, W, 420], fill=(70, 160, 210))  # 물
-            for k in range(6):
-                d.line([0, 320 + k * 18, W, 320 + k * 18], fill=(110, 185, 225), width=2)
-            d.rectangle([0, 420, W, H], fill=(205, 205, 200))  # 풀사이드 타일
-            for x in range(0, W, 60):
-                d.line([x, 420, x, H], fill=(185, 185, 180))
-            d.ellipse([300, 470, 720, 560], fill=(170, 205, 228))  # 물기
-            d.polygon([(780, 600), (830, 500), (880, 600)], fill=(250, 210, 0), outline=(40, 40, 40))
-            d.line([830, 600, 830, 630], fill=(40, 40, 40), width=4)
-            d.rectangle([120, 470, 260, 520], fill=(120, 120, 130))  # 청소 장비(바닥에 둔 호스 릴)
-            d.ellipse([140, 440, 240, 540], outline=(60, 60, 60), width=8)
-        else:
-            d.rectangle([0, 0, W, 260], fill=(200, 205, 212))
-            d.rectangle([0, 260, W, H], fill=(90, 92, 96))  # 차로
-            for x in range(0, W, 120):
-                d.rectangle([x, 440, x + 60, 452], fill=(240, 240, 240))
-            d.rectangle([600, 150, 690, 380], fill=(60, 110, 170))  # 정산기
-            d.rectangle([520, 330, 900, 345], fill=(230, 60, 50))  # 차단기
-            d.rounded_rectangle([60, 300, 420, 470], 30, fill=(180, 30, 40))  # 차량
-            d.ellipse([100, 440, 170, 510], fill=(30, 30, 30))
-            d.ellipse([310, 440, 380, 510], fill=(30, 30, 30))
-            d.rectangle([140, 320, 360, 380], fill=(160, 200, 230))
-        d.text((20, H - 34), "시연용 그림(실제 현장 사진 아님)", fill=(40, 40, 40), font=f)
-        _exif_jpeg(im, "사진/" + name, fac, when)
+        _exif_jpeg(demo_photo(kind), "사진/" + name, fac, when)
 
 
 # 협력업체 DB 시연용: 수선유지 실적 표(엑셀)와 협력부서 작업 완료 보고(한글). 업체는 모두 지어낸 이름.

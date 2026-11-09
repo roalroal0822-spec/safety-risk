@@ -71,7 +71,7 @@ def run_once():
         rp = c.call("POST", "/api/reports", {"photo": {"name": "수영장_풀사이드.jpg", "b64": base64.b64encode(pic).decode()},
                                              "text": "풀사이드 배수구 주변 물이 고여 미끄러움. 청소 호스가 바닥에 둔 채 있음"})
         got.append(("새 기능 · 사진 제보", "사진 위치로 찾은 시설·촬영 시각", "종합체육센터 · 2026-11-09 07:42", f"{rp['fac']} · {rp['shot']}"))
-        got.append(("새 기능 · 사진 제보", "위험요인 후보", "미끄러운 바닥, 걸려 넘어짐", ", ".join({"H02": "미끄러운 바닥", "H13": "걸려 넘어짐"}.get(h["code"], h["code"]) for h in rp["hazards"])))
+        got.append(("새 기능 · 사진 제보", "위험요인 후보(사진 속 이용객 포함)", "미끄러운 바닥, 이용객 부상, 걸려 넘어짐", ", ".join({"H02": "미끄러운 바닥", "H12": "이용객 부상", "H13": "걸려 넘어짐"}.get(h["code"], h["code"]) for h in rp["hazards"])))
         ap = c.call("GET", f"/api/assess/{a['id']}")["approval"]
         got.append(("새 기능 · 결재(영상 미수록)", "조명 교체 결재선(전기설비 담당)", "작성 김도현 → 검토 오세린 → 합의 강태윤 → 승인 서경민",
                     " → ".join(f"{x['step']} {x['name']}" for x in ap["line"])))
