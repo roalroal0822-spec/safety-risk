@@ -313,6 +313,9 @@ const RP = { photo: null, filter: "all", open: null, last: null, data: null };
 async function renderPhoto() {
   const box = $("#tab-photo");
   const d = RP.data = await api("GET", "/api/reports");
+  const keepY = window.scrollY;  // 다시 그릴 때 사진이 읽히는 동안 높이가 줄어 화면이 위로 튀지 않게
+  box.style.minHeight = box.offsetHeight + "px";
+  setTimeout(() => { box.style.minHeight = ""; }, 1500);
   const sm = d.summary;
   const prev = el("div", { class: "rp-prev" }, RP.photo ? el("img", { src: `data:image/jpeg;base64,${RP.photo.b64}`, alt: "올릴 사진" }) : el("span", { class: "muted small" }, "사진을 고르면 여기 보입니다"));
   const file = el("input", { type: "file", id: "rp-file", accept: "image/*", capture: "environment", hidden: true, onchange: async e => {
@@ -366,6 +369,7 @@ async function renderPhoto() {
         el("div", { class: "small muted" }, `${r.shot || r.at} · ${r.reporter}`),
         el("div", {}, r.hazards.filter(h => h.ok !== false).slice(0, 3).map(h => el("span", { class: "chip" }, h.name)))))) : el("div", { class: "empty" }, "이 상태의 제보가 없습니다.")),
     RP.open ? reportDetail(d.items.find(r => r.id === RP.open)) : null);
+  window.scrollTo(0, keepY);
 }
 
 function reportDetail(r) {
