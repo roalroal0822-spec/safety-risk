@@ -9,6 +9,7 @@ from pathlib import Path
 from core import webcommon
 from core.config import Config
 from core.export import export
+from core.loaders import load_bytes
 from core.llm import LLM
 from core.server import App, HttpError, Response, file_response
 from core.sources import safe_parts
@@ -21,9 +22,10 @@ import assess
 import feeds
 import laws
 import photos as pics
+import safety_db as sdb
 from kb import KB
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 HERE = Path(__file__).resolve().parent
 SAMPLE = HERE / "sample_data"
 CATALOG_FILE = "작업 분류(모의).xlsx"
@@ -51,6 +53,9 @@ ABOUT = {
                  ("날씨·재난문자", "기상청 체감온도·기상특보로 작업 시작 판정, 긴급재난문자와 겹치는 평가에 수시평가 표시"),
                  ("평가표·TBM", "평가표·TBM 문안·서명지, 아차사고가 나면 수시평가 표시"),
                  ("아차사고 조치·결과보고", "조치·담당·기한·조치 전후 사진을 기록하고 결과보고서를 미리 보며 고쳐 내려받음, 조치 완료는 같은 작업 평가의 감소대책에, 미완료 조치는 오늘 작업 브리핑에 반영"),
+                 ("결재(검토·합의·승인)", "공종별 담당자가 작성해 검토를 요청하면 안전팀 검토 → 협력부서 합의(지정 시) → 승인권자 승인, 단계마다 처리자·시각·의견 기록, 반려되면 다시 작성"),
+                 ("안전 활동 DB·성과", "평가 작성·승인, 감소대책 완료, TBM 일지, 사진 제보·조치, 아차사고·조치를 원본 기록에서 날짜별로 모아 연간·월간·주간 실적과 체계도로 보여 줌"),
+                 ("협력업체 DB", "협력부서·수선유지 보고서(엑셀 표·한글 글)에서 업체·공사명·금액·기간·시설을 읽어 업체별로 모으고, 위험 작업(중대성 3 위험요인 낱말)이 있으면 협의 대상으로 표시"),
                  ("오늘 작업 브리핑", "기상청 체감온도·특보, 재난문자, 아차사고, 미완료 조치를 평가마다 엮어 작업 중지·시작 전 조치·주의·시작 가능을 규칙으로 판정, AI는 우선순위 문장만"),
                  ("생성형 AI 문장(선택)", "물어보기(이어 묻기)·위험요인 해설·종합 의견·TBM 문안·문단 다듬기. 근거 사실에 없는 숫자·위험요인 코드가 있으면 버리고 규칙 문장")],
     "guards": ["가능성·중대성 조정과 작업 시작 판정은 모델이 하지 않고 규칙으로만 합니다.",
@@ -68,11 +73,15 @@ ABOUT = {
                "사진 제보의 위험요인은 모두 '후보'이며, 안전담당자가 '맞음'으로 확인한 것만 위험성평가로 넘어갑니다.",
                "사진의 촬영 위치는 가장 가까운 시설을 찾는 데만 쓰고, 저장하는 사진에서는 위치·기기·시각 정보(Exif)를 지웁니다(회전 정보만 남김).",
                "키 없이 쓰는 사물 인식(YOLOX-Nano, Apache-2.0)은 사람·차량·의자 같은 물건 80종만 알아보며, 물기·높이·전선 같은 위험 자체는 보지 못한다고 화면에 밝힙니다.",
+               "검토 요청은 확인하지 않은 위험요인이 없어야, 승인은 위험성 높음 항목의 감소대책을 모두 마쳐야 할 수 있고, 반려되면 다시 작성하기 전에는 결재가 진행되지 않습니다.",
+               "안전 활동 성과는 따로 입력한 숫자가 아니라 평가·제보·아차사고·이력 기록에서 매번 다시 셉니다.",
+               "협력업체 DB의 값은 올린 보고서에서 읽은 것만 쓰고 줄마다 원문 위치(파일·행·문단)를 붙이며, 업체명과 공사명을 찾지 못한 보고서는 이유를 표시하고 넣지 않습니다.",
                "공개 시연판은 화면에서 모델 설정을 바꿀 수 없고(키 유출 방지), 모델 호출은 1분에 40번으로 묶습니다."],
     "data": ["시연 자료(위험요인 목록·규정·작업·아차사고)는 모두 지어낸 모의자료입니다. 기관 자료로 바꾸면 그대로 동작합니다.",
              "날씨(기상청 단기예보·기상특보)와 긴급재난문자(행정안전부)는 키를 넣으면 실제 자료를, 키가 없거나 연결이 안 되면 예시 자료를 쓰고 화면에 출처를 표시합니다.",
              "관련 법령 조문은 법제처 국가법령정보 공동활용 Open API(인증값 LAW_OC)에서 받고, 인증값이 없으면 국가법령정보센터 링크만 보여 줍니다.",
              "시연용 사진은 그림이며, 실제 비전 모델의 정확도는 기관 PC에서 실측해야 합니다.",
+             "공종별 담당자·결재자 이름과 협력업체 보고서(업체·금액)는 시연용으로 지어낸 것입니다.",
              "작업 분류·시설 위치(좌표)는 지어낸 모의자료입니다. 기관 표(분류·작업·단계·위험 상황·위험요인 코드 / 시설·위도·경도)를 넣으면 바뀝니다.",
              ("공개 시연판은 방문자 모두가 같은 시연 자료를 보며, 서버를 다시 시작하면 넣은 자료가 지워집니다. 기관 PC에 설치하면 자료는 그 PC의 작업 폴더(data)에만 저장되고 화면도 그 PC에서만 열립니다."
               if cfg.public else "자료는 이 PC의 작업 폴더(data)에만 저장되고, 화면은 이 PC에서만 열립니다.")],
@@ -96,7 +105,7 @@ def kb():
 
 def _copy_sample():
     for p in SAMPLE.rglob("*"):
-        if p.is_file() and "사진" not in p.parts:
+        if p.is_file() and "사진" not in p.parts and VENDOR_DIR not in p.parts:
             dst = KB_ROOT / p.relative_to(SAMPLE)
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(p, dst)
@@ -149,7 +158,12 @@ def put_a(a):
     else:
         items.insert(0, a)
     save_all(items)
-    return dict(a, stats=assess.stats(a))
+    return a_view(a)
+
+
+def a_view(a):
+    ap = approval_of(a)
+    return dict(a, stats=assess.stats(a), approval=dict(ap, stage=sdb.stage(a.get("approval"))))
 
 
 # ------------------------------------------------------------ 상태
@@ -171,7 +185,7 @@ def state(req):
         st = assess.stats(a)
         rows.append({"id": a["id"], "created": a["created"], "fac": a["fac"], "dept": a["dept"], "work": a["work"],
                      "status": a["status"], "top": max((i["R"] for i in a["items"] if i["confirmed"]), default=0),
-                     "reassess": len(a["reassess"]), "stats": st})
+                     "reassess": len(a["reassess"]), "stats": st, "stage": sdb.stage(a.get("approval"))})
     open_high = [{"aid": a["id"], "work": a["work"], "fac": a["fac"], "item": i["name"], "R": i["R"], "measure": m["text"],
                   "owner": m["owner"], "due": m["due"]}
                  for a in items for i in a["items"] if i["confirmed"] and i["level"] == "bad" for m in i["measures"] if not m["done"]]
@@ -249,8 +263,7 @@ def catalog_match(req):
 
 @app.get("/api/assess/<aid>")
 def get_one(req):
-    a = get_a(req.params["aid"])
-    return dict(a, stats=assess.stats(a))
+    return a_view(get_a(req.params["aid"]))
 
 
 @app.post("/api/assess/<aid>/update")
@@ -1182,6 +1195,8 @@ def report_update(req):
     if b.get("status") in REPORT_ST:
         if b["status"] == "완료" and not any(h["ok"] for h in r["hazards"]) and not (b.get("memo") or r["memo"]):
             raise HttpError(400, "완료하려면 확인한 위험요인이 있거나 조치 내용을 적어야 합니다")
+        if b["status"] == "완료" and r["status"] != "완료":
+            r["done_at"] = date.today().isoformat()
         r["status"] = b["status"]
     for k in ("owner", "due", "memo", "fac"):
         if k in b:
@@ -1234,6 +1249,233 @@ def report_samples(req):
     for p in sorted((SAMPLE / "사진").glob("*.jpg")):
         out.append({"name": p.name, "b64": base64.b64encode(p.read_bytes()).decode()})
     return {"items": out}
+
+
+# ------------------------------------------------------------ 공종별 담당·결재(검토·합의·승인)
+
+VENDOR_DIR = "협력업체 보고서"
+DEMO_CFG = {
+    "demo": True,
+    "owners": [{"cat": "전기설비", "name": "김도현", "dept": "시설운영팀"}, {"cat": "기계설비", "name": "이서준", "dept": "시설운영팀"},
+               {"cat": "밀폐공간", "name": "이서준", "dept": "시설운영팀"}, {"cat": "건축·영선", "name": "박지호", "dept": "시설운영팀"},
+               {"cat": "수영장·수처리", "name": "최유나", "dept": "체육사업팀"}, {"cat": "주차장", "name": "정민재", "dept": "교통시설팀"},
+               {"cat": "조경·실외", "name": "한소율", "dept": "시설운영팀"}, {"cat": "청소·미화", "name": "윤하린", "dept": "체육사업팀"}],
+    "reviewer": "오세린", "reviewer_dept": "안전팀", "agree": "강태윤", "agree_dept": "협력부서(계약·시설)",
+    "approver": "서경민", "approver_dept": "경영본부장",
+}
+
+
+def safety_cfg():
+    c = store.read("safety_cfg.json", None)
+    if c is None:
+        c = dict(DEMO_CFG)
+    cats = [x for x in dict.fromkeys(s["cat"] for s in kb().catalog)]
+    have = {o["cat"] for o in c["owners"]}
+    c["owners"] = [o for o in c["owners"] if o["cat"] in cats] + [{"cat": x, "name": "", "dept": ""} for x in cats if x not in have]
+    return c
+
+
+@app.get("/api/safety-cfg")
+def get_safety_cfg(req):
+    return safety_cfg()
+
+
+@app.post("/api/safety-cfg")
+def set_safety_cfg(req):
+    b = req.json or {}
+    c = safety_cfg()
+    for k in ("reviewer", "reviewer_dept", "agree", "agree_dept", "approver", "approver_dept"):
+        if k in b:
+            c[k] = mask(str(b[k] or "").strip()[:30])[0]
+    by = {o["cat"]: o for o in c["owners"]}
+    for o in b.get("owners") or []:
+        if o.get("cat") in by:
+            by[o["cat"]].update(name=mask(str(o.get("name") or "").strip()[:20])[0], dept=str(o.get("dept") or "").strip()[:20])
+    c["demo"] = False
+    store.write("safety_cfg.json", c)
+    log("공종별 담당·결재선 설정")
+    return c
+
+
+def approval_of(a):
+    ap = a.get("approval")
+    if not ap:
+        ap = {"line": sdb.new_line(safety_cfg(), sdb.cat_of(a), a.get("dept", "")), "rejected": False, "history": []}
+    return ap
+
+
+@app.post("/api/assess/<aid>/approve")
+def approve(req):
+    """결재: next(현재 단계 처리) · reject(반려) · reset(다시 작성)."""
+    a = get_a(req.params["aid"])
+    b = req.json or {}
+    ap = approval_of(a)
+    if b.get("action") == "reset":  # 다시 작성: 결재선을 지금 설정으로 새로 잡는다(이력은 남김)
+        ap["line"] = sdb.new_line(safety_cfg(), sdb.cat_of(a), a.get("dept", ""))
+    name, _ = mask(str(b.get("name") or "").strip()[:20])
+    memo, _ = mask(str(b.get("memo") or "").strip()[:200])
+    cur = next((x for x in ap["line"] if x["result"] != "완료"), None)
+    if b.get("action") == "next" and cur and cur["step"] == "작성":
+        st = assess.stats(a)
+        if st["unconfirmed"] or not any(i["confirmed"] for i in a["items"]):
+            raise HttpError(400, "확인하지 않은 위험요인이 있거나 위험요인이 없어 검토를 요청할 수 없습니다")
+    if b.get("action") == "next" and cur and cur["step"] == "승인" and not assess.stats(a)["ready"]:
+        raise HttpError(400, "위험성 높음 항목의 감소대책이 끝나지 않아 승인할 수 없습니다(작업 전 조치 필요)")
+    try:
+        step = sdb.act(ap, b.get("action") or "next", name, memo, sdb.today_str())
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    a["approval"] = ap
+    a["status"] = "확정" if sdb.stage(ap) == "승인" else "작성 중"
+    log("평가 결재", f"{a['work']} {step} → {sdb.stage(ap)}")
+    return put_a(a)
+
+
+# ------------------------------------------------------------ 안전 활동 DB·성과
+
+def all_activities():
+    k = kb()
+    return sdb.activities(assessments(), reports(), k.incidents, followups(), store.read_log("history.jsonl"))
+
+
+@app.get("/api/performance")
+def performance(req):
+    unit = req.query.get("unit", "month")
+    if unit not in ("year", "month", "week"):
+        unit = "month"
+    anchor = req.query.get("anchor") or date.today().isoformat()
+    try:
+        date.fromisoformat(anchor)
+    except ValueError:
+        raise HttpError(400, "기준일은 2026-11-09 형식입니다")
+    items = assessments()
+    p = sdb.performance(all_activities(), items, reports(), unit, anchor)
+    c = safety_cfg()
+    waiting = []
+    for a in items:
+        ap = a.get("approval")
+        sg = sdb.stage(ap)
+        if sg in ("검토 대기", "합의 대기", "승인 대기", "반려"):
+            cur = next((x for x in ap["line"] if x["result"] != "완료"), {})
+            waiting.append({"id": a["id"], "work": a["work"], "fac": a["fac"], "stage": sg, "who": cur.get("name", ""), "since": (ap.get("history") or [{}])[-1].get("at", "")})
+    by_owner = {}
+    for a in items:
+        o = sdb.owner_of(c, sdb.cat_of(a), a.get("dept", ""))
+        key = (o["cat"], o["name"]) if o else ("공종 미지정", "")
+        x = by_owner.setdefault(key, {"cat": key[0], "name": key[1], "total": 0, "approved": 0, "open": 0})
+        x["total"] += 1
+        x["approved"] += sdb.stage(a.get("approval")) == "승인"
+        x["open"] += sum(1 for i in a["items"] if i["confirmed"] for m in i["measures"] if not m["done"])
+    rp = reports()
+    k = kb()
+    vj = vendor_jobs()
+    p.update(cfg=c, waiting=waiting, by_owner=sorted(by_owner.values(), key=lambda x: -x["total"]),
+             counts={"assess": len(items), "reports": len(rp), "reports_open": sum(1 for r in rp if r["status"] in ("접수", "확인", "조치 중")),
+                     "incidents": len(k.incidents), "vendors": len({sdb.norm_vendor(j["vendor"]) for j in vj}), "vendor_jobs": len(vj)})
+    return p
+
+
+@app.post("/api/performance/xlsx")
+def performance_xlsx(req):
+    b = req.json or {}
+    unit, anchor = b.get("unit", "month"), b.get("anchor") or date.today().isoformat()
+    p = sdb.performance(all_activities(), assessments(), reports(), unit, anchor)
+    rows = [[x["date"], x["kind"], x["fac"], x["cat"], x["who"], x["title"], x["ref"]] for x in p["rows"]]
+    summ = [[k, v] for k, v in p["by_kind"].items()]
+    summ += [["감소대책 완료율", f"{p['measures']['done']}/{p['measures']['total']}"],
+             ["제보 조치 완료", f"{p['reports']['done']}/{p['reports']['total']}"],
+             ["제보 평균 처리 일수", p["reports"]["avg_days"] if p["reports"]["avg_days"] is not None else "-"],
+             ["평가 승인", f"{p['approval']['approved']}/{p['approval']['total']}"], ["참여 인원(실명)", p["people"]]]
+    trend = [[t["label"], t["from"], t["to"]] + [t["counts"][k] for k in sdb.KINDS] for t in p["trend"]]
+    data = workbook([("요약", ["항목", p["label"]], summ, [22, 16]),
+                     ("추이", ["구간", "시작", "끝"] + sdb.KINDS, trend, [8, 11, 11] + [12] * len(sdb.KINDS)),
+                     ("활동 기록", ["날짜", "활동", "시설", "공종", "담당·제보자", "내용", "원본"], rows, [11, 14, 12, 12, 10, 50, 10])],
+                    note=f"무사히 안전 활동 DB · {p['label']} · 원본 기록(평가·제보·아차사고·이력)에서 다시 계산한 값")
+    log("안전 활동 실적 엑셀", p["label"])
+    return file_response(data, f"안전활동실적_{p['from']}_{p['to']}.xlsx", XLSX)
+
+
+# ------------------------------------------------------------ 협력업체 DB(협력부서·수선유지 보고서)
+
+def vendor_docs():
+    return store.read("vendors.json", {"docs": []})["docs"]
+
+
+def vendor_jobs():
+    return [dict(j, doc=d["id"]) for d in vendor_docs() for j in d["jobs"]]
+
+
+def _add_vendor_doc(raw, rel, docs):
+    doc = load_bytes(raw, rel)
+    jobs = [] if doc.error else sdb.parse_vendor_doc(doc)
+    for j in jobs:
+        for k2 in ("work", "note", "vendor"):
+            j[k2] = mask(j[k2])[0]
+    d = {"id": "V" + uuid.uuid4().hex[:6], "name": rel, "at": date.today().isoformat(), "jobs": jobs,
+         "error": doc.error or ("" if jobs else "업체명과 공사명(작업명) 열이나 '업체명: …', '공사명: …' 항목을 찾지 못했습니다")}
+    docs[:] = [x for x in docs if x["name"] != rel] + [d]
+    return d
+
+
+def vendor_view():
+    k = kb()
+    docs = vendor_docs()
+    vs = sdb.vendors(vendor_jobs(), k)
+    return {"docs": [{"id": d["id"], "name": d["name"], "at": d["at"], "jobs": len(d["jobs"]), "error": d["error"]} for d in docs],
+            "vendors": vs, "total": {"vendors": len(vs), "jobs": sum(v["count"] for v in vs), "amount": sum(v["amount"] for v in vs),
+                                      "risky": sum(1 for v in vs if v["risky"])}}
+
+
+@app.get("/api/vendors")
+def vendor_list(req):
+    return vendor_view()
+
+
+@app.post("/api/vendors/upload")
+def vendor_upload(req):
+    files = (req.json or {}).get("files") or []
+    if not files:
+        raise HttpError(400, "올릴 파일이 없습니다")
+    docs = vendor_docs()
+    out = []
+    for f in files[:20]:
+        name = Path(f.get("path") or f.get("name") or "").name
+        if Path(name).suffix.lower() not in (".xlsx", ".hwpx", ".docx", ".txt", ".pdf", ".csv", ".hwp"):
+            raise HttpError(400, f"읽을 수 없는 형식입니다: {name}")
+        out.append(_add_vendor_doc(base64.b64decode(f["b64"]), name, docs))
+    store.write("vendors.json", {"docs": docs})
+    log("협력업체 보고서 올리기", ", ".join(d["name"] for d in out))
+    return dict(vendor_view(), added=[{"name": d["name"], "jobs": len(d["jobs"]), "error": d["error"]} for d in out])
+
+
+@app.post("/api/vendors/sample")
+def vendor_sample(req):
+    docs = vendor_docs()
+    for p in sorted((SAMPLE / VENDOR_DIR).glob("*")):
+        _add_vendor_doc(p.read_bytes(), p.name, docs)
+    store.write("vendors.json", {"docs": docs})
+    log("협력업체 보고서 시연 자료 넣기")
+    return vendor_view()
+
+
+@app.delete("/api/vendors/<did>")
+def vendor_delete(req):
+    store.write("vendors.json", {"docs": [d for d in vendor_docs() if d["id"] != req.params["did"]]})
+    return vendor_view()
+
+
+@app.post("/api/vendors/xlsx")
+def vendor_xlsx(req):
+    v = vendor_view()
+    rows = [[x["name"], x["count"], x["amount"], ", ".join(x["facs"]), ", ".join(x["depts"]), x["last"],
+             ", ".join(f"{r['code']} {r['name']}" for r in x["risky"]) or "-"] for x in v["vendors"]]
+    jobs = [[x["name"], j["work"], j["amount"], j["start"], j["end"], j["fac"], j["dept"], j["note"], f"{j['src']['file']} {j['src']['loc']}"]
+            for x in v["vendors"] for j in x["jobs"]]
+    data = workbook([("업체", ["업체", "작업 건수", "금액 합계(원)", "시설", "발주 부서", "최근 작업일", "위험 작업(협의 대상)"], rows, [20, 9, 14, 24, 16, 12, 36]),
+                     ("작업 기록", ["업체", "공사·작업명", "금액(원)", "시작", "끝", "시설", "부서", "안전·비고", "원문 위치"], jobs, [18, 34, 12, 11, 11, 14, 12, 30, 30])],
+                    note="무사히 협력업체 DB · 올린 보고서에서 읽은 값(원문 위치 표시) · 위험 작업은 중대성 3 위험요인 낱말이 공사명·비고에 있는 경우")
+    log("협력업체 DB 엑셀")
+    return file_response(data, f"협력업체DB_{date.today().isoformat()}.xlsx", XLSX)
 
 
 @app.post("/api/kb/upload")

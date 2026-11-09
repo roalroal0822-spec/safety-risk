@@ -410,17 +410,187 @@ function reportDetail(r) {
       el("button", { class: "danger small", onclick: async () => { if (!confirm("이 제보를 지울까요? 되돌릴 수 없습니다.")) return; await api("DELETE", `/api/reports/${r.id}`); RP.open = null; renderPhoto(); } }, "삭제")));
 }
 
+// ------------------------------------------------------------ 안전 성과: 체계도·연간/월간/주간 실적·결재 대기·공종 담당·협력업체 DB
+const PF = { unit: "month", anchor: null, data: null, vend: null, openV: null, edit: false };
+const KIND_CLR = { "위험성평가 작성": "#12397a", "평가 승인": "#3a6fd8", "감소대책 완료": "#30a46c", "TBM 실시": "#7c5cd6", "사진 제보": "#e2860b", "제보 조치 완료": "#c9a24a", "아차사고 등록": "#e5484d", "아차사고 조치 완료": "#8b95a1" };
+const won = n => n >= 1e8 ? (n / 1e8).toFixed(1).replace(/\.0$/, "") + "억 원" : n >= 1e4 ? Math.round(n / 1e4).toLocaleString() + "만 원" : n.toLocaleString() + "원";
+function shiftAnchor(dir) {
+  const d = new Date(PF.anchor + "T00:00:00");
+  if (PF.unit === "year") d.setFullYear(d.getFullYear() + dir);
+  else if (PF.unit === "month") { d.setDate(1); d.setMonth(d.getMonth() + dir); }
+  else d.setDate(d.getDate() + 7 * dir);
+  const z = n => String(n).padStart(2, "0");
+  PF.anchor = `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+  renderPerf();
+}
+function sysDiagram(p) {
+  const c = p.cfg, n = p.counts, w = st => p.waiting.filter(x => x.stage === st).length;
+  const owners = c.owners.filter(o => o.name);
+  const node = (cls, title, who, big, sub) => el("div", { class: "sd-node " + cls }, el("div", { class: "sd-t" }, title), who ? el("div", { class: "sd-who" }, who) : null,
+    big != null ? el("div", { class: "sd-big" }, big) : null, sub ? el("div", { class: "sd-sub" }, sub) : null);
+  const arrow = lbl => el("div", { class: "sd-arrow", "aria-hidden": "true" }, el("span", {}, lbl || ""));
+  return el("div", { class: "panel sd" },
+    el("div", { class: "row" }, el("h2", { style: { margin: 0, flex: 1 } }, "안전관리 체계도"), c.demo ? el("span", { class: "tag gray" }, "이름은 시연용 예시") : null),
+    el("p", { class: "small muted" }, "누가 무엇을 올리고, 누가 검토·합의·승인하며, 그 기록이 어떻게 성과로 모이는지 한 장으로 봅니다. 숫자는 지금 저장된 기록에서 바로 셉니다."),
+    el("div", { class: "sd-in" },
+      node("in", "전 직원", "사진 한 장으로 위험 제보", `${n.reports}건`, `조치 중·대기 ${n.reports_open}건`),
+      node("in", "공종 담당", `${owners.length}개 공종 · ${[...new Set(owners.map(o => o.name))].length}명`, `${n.assess}건`, "위험성평가·TBM 작성"),
+      node("in", "아차사고", "현장 보고", `${n.incidents}건`, "같은 작업 평가에 수시평가 표시"),
+      node("in", "협력업체", "수선유지·협력부서 보고서", `${n.vendors}곳`, `작업 ${n.vendor_jobs}건 · 위험 작업은 협의 대상`)),
+    el("div", { class: "sd-down", "aria-hidden": "true" }),
+    el("div", { class: "sd-flow" },
+      node("st", "작성", "공종 담당", null, "위험요인 확인 후 검토 요청"), arrow(),
+      node("st", "검토", `${c.reviewer_dept || "안전팀"} ${c.reviewer || "(미지정)"}`, w("검토 대기"), "대기"), arrow(),
+      node("st" + (c.agree ? "" : " off"), "합의", c.agree ? `${c.agree_dept || "협력부서"} ${c.agree}` : "지정 안 함(건너뜀)", c.agree ? w("합의 대기") : null, c.agree ? "대기" : ""), arrow(),
+      node("st", "승인", `${c.approver_dept || "승인권자"} ${c.approver || "(미지정)"}`, w("승인 대기"), "대기"), arrow(),
+      node("st done", "확정", "작업 시작", p.approval.approved, `${p.label} 승인`)),
+    el("div", { class: "sd-down", "aria-hidden": "true" }),
+    el("div", { class: "sd-out" },
+      node("db", "안전 활동 DB", "평가·승인·감소대책·TBM·제보·조치·아차사고", `${p.total}건`, `${p.label} 활동`),
+      node("db", "연간 · 월간 · 주간 성과", "아래 표와 엑셀로", `${p.measures.total ? Math.round(p.measures.done / p.measures.total * 100) : 0}%`, "감소대책 완료율")));
+}
+function trendChart(p) {
+  const max = Math.max(1, ...p.trend.map(t => Object.values(t.counts).reduce((a, b) => a + b, 0)));
+  return el("div", { class: "pf-trend", role: "img", "aria-label": `${p.label} 안전 활동 추이` },
+    p.trend.map(t => {
+      const tot = Object.values(t.counts).reduce((a, b) => a + b, 0);
+      return el("div", { class: "pf-col", title: `${t.label} (${t.from}~${t.to}) ` + Object.entries(t.counts).filter(x => x[1]).map(([k, v]) => `${k} ${v}`).join(", ") },
+        el("div", { class: "pf-n" }, tot || ""),
+        el("div", { class: "pf-stack", style: { height: `${tot / max * 100}%` } }, Object.entries(t.counts).filter(x => x[1]).map(([k, v]) => el("i", { style: { flex: v, background: KIND_CLR[k] } }))),
+        el("div", { class: "pf-l" }, t.label));
+    }));
+}
+function ownerTable(p) {
+  const c = p.cfg;
+  if (!PF.edit) {
+    const stat = Object.fromEntries(p.by_owner.map(x => [x.cat, x]));
+    return el("div", {},
+      el("div", { class: "tbl-scroll" }, el("table", { class: "t" }, el("tr", {}, ["공종", "담당", "부서", "평가", "승인", "미완료 감소대책"].map(h => el("th", {}, h))),
+        c.owners.map(o => { const s = stat[o.cat] || {}; return el("tr", {}, el("td", {}, o.cat), el("td", {}, o.name || el("span", { class: "muted" }, "미지정")), el("td", {}, o.dept),
+          el("td", {}, s.total || 0), el("td", {}, s.approved || 0), el("td", {}, s.open ? el("span", { class: "tag warn" }, s.open) : 0)); }),
+        stat["공종 미지정"] ? el("tr", {}, el("td", {}, "공종 미지정"), el("td", { colspan: 2, class: "muted" }, "작업 분류를 고르지 않은 평가"), el("td", {}, stat["공종 미지정"].total), el("td", {}, stat["공종 미지정"].approved), el("td", {}, stat["공종 미지정"].open)) : null)),
+      el("div", { class: "small muted" }, `결재선: 공종 담당(작성) → ${c.reviewer_dept} ${c.reviewer || "미지정"}(검토) → ${c.agree ? `${c.agree_dept} ${c.agree}(합의) → ` : ""}${c.approver_dept} ${c.approver || "미지정"}(승인)`),
+      el("button", { class: "small", style: { marginTop: "8px" }, id: "pf-edit", onclick: () => { PF.edit = true; renderPerf(); } }, "담당자·결재선 바꾸기"));
+  }
+  const inp = (v, ph) => el("input", { type: "text", value: v || "", placeholder: ph });
+  const rows = c.owners.map(o => ({ cat: o.cat, name: inp(o.name, "이름"), dept: inp(o.dept, "부서") }));
+  const f = { reviewer: inp(c.reviewer, "이름"), reviewer_dept: inp(c.reviewer_dept, "부서"), agree: inp(c.agree, "비우면 합의 단계 건너뜀"), agree_dept: inp(c.agree_dept, "부서"),
+    approver: inp(c.approver, "이름"), approver_dept: inp(c.approver_dept, "직위·부서") };
+  return el("div", {},
+    el("div", { class: "tbl-scroll" }, el("table", { class: "t pf-edit" }, el("tr", {}, ["공종(작업 분류)", "담당", "부서"].map(h => el("th", {}, h))),
+      rows.map(r => el("tr", {}, el("td", {}, r.cat), el("td", {}, r.name), el("td", {}, r.dept))),
+      [["검토(안전팀)", "reviewer"], ["합의(협력부서)", "agree"], ["승인", "approver"]].map(([l, k]) => el("tr", {}, el("th", {}, l), el("td", {}, f[k]), el("td", {}, f[k + "_dept"]))))),
+    el("div", { class: "row", style: { marginTop: "8px" } },
+      el("button", { class: "primary", id: "pf-save", onclick: async () => {
+        await api("POST", "/api/safety-cfg", Object.assign(Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v.value])), { owners: rows.map(r => ({ cat: r.cat, name: r.name.value, dept: r.dept.value })) }));
+        PF.edit = false; toast("담당자와 결재선을 저장했습니다. 새로 결재를 시작하는 평가부터 적용됩니다."); renderPerf();
+      } }, "저장"), el("button", { onclick: () => { PF.edit = false; renderPerf(); } }, "취소")));
+}
+function vendorBox(v) {
+  const file = el("input", { type: "file", id: "vd-file", multiple: true, accept: ".xlsx,.hwpx,.docx,.pdf,.txt,.csv", hidden: true, onchange: async e => {
+    const files = await readFiles([...e.target.files]); if (!files.length) return;
+    const r = await api("POST", "/api/vendors/upload", { files });
+    PF.vend = r; r.added.forEach(a => toast(a.error ? `${a.name}: ${a.error}` : `${a.name}: 작업 ${a.jobs}건을 읽었습니다`, !!a.error)); renderPerf();
+  } });
+  const t = v.total;
+  return el("div", { class: "panel", id: "vd" },
+    el("div", { class: "row" }, el("h2", { style: { margin: 0, flex: 1 } }, "협력업체 DB"),
+      el("label", { for: "vd-file", class: "btn-like", role: "button", tabindex: 0, onkeydown: e => { if (e.key === "Enter") file.click(); } }, "보고서 올리기"), file,
+      el("button", { id: "vd-sample", onclick: async () => { PF.vend = await api("POST", "/api/vendors/sample"); toast("시연용 보고서 3개를 읽었습니다"); renderPerf(); } }, "시연 보고서 넣기"),
+      v.vendors.length ? el("button", { onclick: () => download("/api/vendors/xlsx", {}) }, "엑셀") : null),
+    el("p", { class: "small muted" }, "협력부서 작업 완료 보고, 수선유지 실적 표(엑셀·한글·워드·PDF)를 올리면 업체명·공사명·금액·기간·시설을 읽어 업체별로 모읍니다. 읽은 값마다 원문 위치가 붙고, 공사명·안전 비고에 중대성 3 위험요인 낱말이 있으면 '위험 작업'으로 표시해 도급 작업 안전보건 협의 대상을 바로 봅니다."),
+    v.docs.length ? el("div", { class: "row small", style: { gap: "6px" } }, v.docs.map(d => el("span", { class: "chip" + (d.error ? " bad" : "") , title: d.error || "" }, `${d.name} · ${d.error ? "읽지 못함" : d.jobs + "건"}`,
+      el("button", { class: "x", "aria-label": `${d.name} 빼기`, onclick: async () => { PF.vend = await api("DELETE", `/api/vendors/${d.id}`); renderPerf(); } }, "×")))) : null,
+    v.vendors.length ? [
+      el("div", { class: "kpis", style: { margin: "12px 0" } },
+        [["업체", t.vendors + "곳"], ["작업", t.jobs + "건"], ["금액 합계", won(t.amount)], ["위험 작업 업체", t.risky + "곳", t.risky ? "warn" : ""]].map(([l, x, c]) => el("div", { class: "stat" + (c ? " " + c : "") }, el("div", { class: "lbl" }, l), el("b", {}, x)))),
+      el("div", { class: "tbl-scroll" }, el("table", { class: "t vd-t" }, el("tr", {}, ["업체", "작업", "금액", "시설", "발주 부서", "최근 작업", "위험 작업(협의 대상)"].map(h => el("th", {}, h))),
+        v.vendors.map(x => [el("tr", { class: "vd-row" + (PF.openV === x.key ? " on" : ""), onclick: () => { PF.openV = PF.openV === x.key ? null : x.key; renderPerf(); } },
+          el("td", {}, el("b", {}, x.name)), el("td", {}, x.count + "건"), el("td", {}, won(x.amount)), el("td", {}, x.facs.join(", ")), el("td", {}, x.depts.join(", ")), el("td", {}, x.last),
+          el("td", {}, x.risky.length ? x.risky.map(r => el("span", { class: "tag warn", style: { marginRight: "4px" } }, r.name)) : el("span", { class: "muted" }, "-"))),
+          PF.openV === x.key ? el("tr", { class: "vd-jobs" }, el("td", { colspan: 7 }, x.jobs.map(j => el("div", { class: "vd-job" },
+            el("b", {}, j.work), el("span", {}, `${j.start}${j.end && j.end !== j.start ? " ~ " + j.end : ""}`), el("span", {}, won(j.amount)), el("span", {}, j.fac), el("span", { class: "muted" }, j.note),
+            el("span", { class: "chip", title: j.src.quote }, `${j.src.file} ${j.src.loc}`))))) : null]))),
+    ] : el("div", { class: "empty" }, "아직 올린 보고서가 없습니다. '시연 보고서 넣기'로 모의 수선유지 실적·작업 완료 보고를 읽어 볼 수 있습니다."));
+}
+async function renderPerf() {
+  const box = $("#tab-perf");
+  if (!PF.anchor) PF.anchor = (S && S.today) || new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+  const keepY = window.scrollY;
+  box.style.minHeight = box.offsetHeight + "px"; setTimeout(() => { box.style.minHeight = ""; }, 1200);
+  const [p, v] = await Promise.all([api("GET", `/api/performance?unit=${PF.unit}&anchor=${PF.anchor}`), PF.vend ? Promise.resolve(PF.vend) : api("GET", "/api/vendors")]);
+  PF.data = p; PF.vend = v;
+  const kpi = (lbl, val, sub, cls) => el("div", { class: "stat" + (cls ? " " + cls : "") }, el("div", { class: "lbl" }, lbl), el("b", {}, val), sub ? el("div", { class: "small muted" }, sub) : null);
+  const md = p.measures, rp = p.reports;
+  const maxF = Math.max(1, ...p.by_fac.map(x => x[1]));
+  box.replaceChildren(
+    sysDiagram(p),
+    el("div", { class: "panel" },
+      el("div", { class: "row" }, el("h2", { style: { margin: 0, flex: 1 } }, "안전 활동 성과"),
+        el("div", { class: "seg", role: "group", "aria-label": "기간 단위" }, [["year", "연간"], ["month", "월간"], ["week", "주간"]].map(([k, l]) =>
+          el("button", { class: PF.unit === k ? "on" : "", "data-unit": k, onclick: () => { PF.unit = k; renderPerf(); } }, l))),
+        el("button", { class: "small", "aria-label": "이전 기간", onclick: () => shiftAnchor(-1) }, "‹"), el("b", { class: "pf-label" }, p.label),
+        el("button", { class: "small", "aria-label": "다음 기간", onclick: () => shiftAnchor(1) }, "›"),
+        el("button", { onclick: () => download("/api/performance/xlsx", { unit: PF.unit, anchor: PF.anchor }) }, "엑셀")),
+      el("p", { class: "small muted" }, "안전 활동 DB는 따로 입력하지 않습니다. 위험성평가·결재·감소대책 완료·TBM 일지·사진 제보·조치·아차사고 기록에서 날짜별로 다시 셉니다(시연용 아차사고 4건은 모의자료)."),
+      el("div", { class: "kpis" },
+        kpi("안전 활동", p.total + "건", `참여 ${p.people}명(실명)`),
+        kpi("감소대책 완료율", md.total ? Math.round(md.done / md.total * 100) + "%" : "-", `${md.done}/${md.total}개 · 기간 안 평가`, md.total && md.done < md.total ? "warn" : ""),
+        kpi("사진 제보 조치", `${rp.done}/${rp.total}건`, rp.avg_days != null ? `평균 ${rp.avg_days}일 만에 완료` : "완료된 제보 없음"),
+        kpi("평가 승인", `${p.approval.approved}/${p.approval.total}건`, `결재 진행 ${p.approval.waiting}건`, p.approval.waiting ? "warn" : "")),
+      el("div", { class: "pf-grid" },
+        el("div", {}, el("h3", {}, "추이"), trendChart(p),
+          el("div", { class: "pf-legend small" }, Object.entries(KIND_CLR).map(([k, c]) => el("span", {}, el("i", { style: { background: c } }), k)))),
+        el("div", {}, el("h3", {}, "활동별"), el("table", { class: "t pf-kind" }, Object.entries(p.by_kind).map(([k, n]) => el("tr", {}, el("td", {}, el("i", { class: "dot", style: { background: KIND_CLR[k] } }), k), el("td", {}, n + "건")))),
+          el("h3", {}, "시설별"), p.by_fac.length ? p.by_fac.slice(0, 6).map(([f, n]) => el("div", { class: "rp-bar" }, el("span", {}, f), el("i", { style: { width: `${n / maxF * 100}%` } }), el("b", {}, n))) : el("div", { class: "small muted" }, "기간 안 활동이 없습니다."),
+          p.by_cat.length ? [el("h3", {}, "공종별"), el("div", {}, p.by_cat.map(([c, n]) => el("span", { class: "chip" }, `${c} ${n}`)))] : null)),
+      p.rows.length ? el("details", { class: "pf-rows" }, el("summary", {}, `활동 기록 ${p.rows.length}건 보기`),
+        el("div", { class: "tbl-scroll" }, el("table", { class: "t" }, el("tr", {}, ["날짜", "활동", "시설", "공종", "담당·제보자", "내용"].map(h => el("th", {}, h))),
+          p.rows.slice(0, 100).map(x => el("tr", {}, el("td", {}, x.date), el("td", {}, el("i", { class: "dot", style: { background: KIND_CLR[x.kind] } }), x.kind), el("td", {}, x.fac), el("td", {}, x.cat), el("td", {}, x.who), el("td", {}, x.title)))))) : null),
+    el("div", { class: "pf-two" },
+      el("div", { class: "panel" }, el("h2", {}, "결재 대기"),
+        p.waiting.length ? el("table", { class: "t" }, el("tr", {}, ["단계", "작업", "처리할 사람", ""].map(h => el("th", {}, h))),
+          p.waiting.map(x => el("tr", {}, el("td", {}, el("span", { class: "tag " + (x.stage === "반려" ? "bad" : "warn") }, x.stage)), el("td", {}, `${x.fac} · ${x.work}`), el("td", {}, x.who),
+            el("td", {}, el("button", { class: "small", onclick: () => openA(x.id) }, "열기"))))) : el("div", { class: "empty" }, "결재를 기다리는 평가가 없습니다.")),
+      el("div", { class: "panel" }, el("h2", {}, "공종별 담당자"), ownerTable(p))),
+    vendorBox(v));
+  window.scrollTo(0, keepY);
+}
+
+function approvalPanel(a) {
+  const ap = a.approval, sg = ap.stage;
+  const cur = ap.line.find(x => x.result !== "완료");
+  const memo = el("input", { type: "text", class: "wide", id: "ap-memo", placeholder: "의견(선택)" });
+  const name = el("input", { type: "text", id: "ap-name", value: cur && !ap.rejected ? cur.name : "", placeholder: "처리자 이름" });
+  const go = async action => {
+    try { CUR = await api("POST", `/api/assess/${a.id}/approve`, { action, name: name.value, memo: memo.value }); renderDetail(); S = await api("GET", "/api/state"); renderDash(); renderList(); toast(`결재: ${CUR.approval.stage}`); }
+    catch (e) { /* api()가 알림을 띄움 */ }
+  };
+  const label = { "작성": "검토 요청", "검토": "검토 완료", "합의": "합의", "승인": "승인" };
+  return el("div", { class: "panel ap" },
+    el("div", { class: "row" }, el("h3", { style: { margin: 0, flex: 1 } }, "결재"), el("span", { class: "tag " + (sg === "승인" ? "ok" : sg === "반려" ? "bad" : sg === "작성 중" ? "gray" : "warn") }, sg)),
+    el("div", { class: "ap-line" }, ap.line.map(x => el("div", { class: "ap-step" + (x.result === "완료" ? " done" : x.result === "반려" ? " rej" : x === cur ? " cur" : "") },
+      el("div", { class: "ap-s" }, x.step), el("div", { class: "ap-r small muted" }, x.role), el("div", { class: "ap-n" }, x.name || "미지정"),
+      el("div", { class: "ap-at small" }, x.result ? `${x.result} ${x.at.slice(5)}` : x === cur ? "차례" : ""), x.memo ? el("div", { class: "small muted" }, x.memo) : null))),
+    sg === "승인" ? el("div", { class: "row" }, el("span", { class: "small muted" }, "승인되어 평가가 확정되었습니다."), el("button", { class: "small", onclick: () => go("reset") }, "다시 작성(결재 새로)"))
+      : ap.rejected ? el("div", { class: "row" }, el("span", { class: "small", style: { color: "var(--bad)" } }, "반려되었습니다. 고친 뒤 다시 작성해 결재를 올리세요."), name, el("button", { class: "primary", onclick: () => go("reset") }, "다시 작성"))
+      : el("div", { class: "row" }, name, memo, el("button", { class: "primary", id: "ap-next", onclick: () => go("next") }, label[cur.step]),
+        cur.step !== "작성" ? el("button", { onclick: () => go("reject") }, "반려") : null),
+    el("div", { class: "small muted" }, "작성 → 검토 요청은 확인 안 한 위험요인이 없어야, 승인은 위험성 높음 항목의 감소대책을 마쳐야 할 수 있습니다. 결재선은 '안전 성과' 탭의 공종별 담당자 표에서 정합니다."),
+    ap.history.length ? el("details", {}, el("summary", { class: "small" }, `결재 이력 ${ap.history.length}건`), ap.history.slice().reverse().map(h => el("div", { class: "small" }, `${h.at} · ${h.name || "-"} · ${h.what}${h.memo ? " · " + h.memo : ""}`))) : null);
+}
+
 // ------------------------------------------------------------ 목록·상세
 function renderList() {
   const box = $("#list-box");
   box.innerHTML = "";
   if (!S.assessments.length) { box.append(el("div", { class: "panel empty" }, "평가가 없습니다.")); return; }
   box.append(el("div", { class: "panel" }, el("h2", {}, "평가 목록"),
-    el("div", { class: "tbl-scroll" }, el("table", { class: "t list-t" }, el("tr", {}, ["", "평가일", "시설", "작업", "최고 위험성", "미완료 조치", "상태"].map(h => el("th", {}, h))),
+    el("div", { class: "tbl-scroll" }, el("table", { class: "t list-t" }, el("tr", {}, ["", "평가일", "시설", "작업", "최고 위험성", "미완료 조치", "결재", "상태"].map(h => el("th", {}, h))),
       S.assessments.map(a => el("tr", {}, el("td", {}, el("button", { class: "small", "aria-label": `${a.fac} ${a.work} 평가 열기`, onclick: () => openA(a.id) }, "열기")),
         el("td", {}, a.created), el("td", {}, a.fac), el("td", {}, a.work),
         el("td", {}, el("span", { class: "tag " + (a.top >= 6 ? "bad" : a.top >= 3 ? "warn" : "ok") }, a.top)),
-        el("td", {}, a.stats.open), el("td", {}, a.status, a.reassess ? el("span", { class: "tag warn", style: { marginLeft: "6px" } }, "수시평가 필요") : null)))))));
+        el("td", {}, a.stats.open), el("td", {}, el("span", { class: "tag " + (a.stage === "승인" ? "ok" : a.stage === "반려" ? "bad" : a.stage === "작성 중" ? "gray" : "warn") }, a.stage)), el("td", {}, a.status, a.reassess ? el("span", { class: "tag warn", style: { marginLeft: "6px" } }, "수시평가 필요") : null)))))));
 }
 
 async function openA(id) {
@@ -466,13 +636,13 @@ function renderDetail() {
       el("button", { class: "primary", onclick: () => openSheetEditor(true) }, "미리보기·고쳐서 내려받기"),
       el("button", { onclick: () => download(`/api/assess/${a.id}/xlsx`, {}) }, "엑셀"),
       el("button", { onclick: showTBM }, "작업 전 회의(TBM)"),
-      el("button", { class: a.status === "확정" ? "" : "primary", onclick: () => save({ status: a.status === "확정" ? "작성 중" : "확정" }) }, a.status === "확정" ? "확정 풀기" : "평가 확정"),
       el("span", { style: { flex: 1 } }),
       el("button", { class: "danger small", title: "이 평가를 지웁니다(되돌릴 수 없음)", onclick: async () => {
         if (!confirm(`'${a.fac} · ${a.work}' 평가를 지울까요? 지우면 되돌릴 수 없습니다.`)) return;
         await api("DELETE", `/api/assess/${a.id}`); CUR = null; box.innerHTML = ""; await load(); toast("평가를 지웠습니다");
       } }, "평가 삭제"))),
     el("div", { id: "rep-edit" }));
+  box.append(approvalPanel(a));
 
   const ls = a.method !== "3";
   const todo = it => !it.confirmed || it.measures.some(m => !m.done && (!m.owner || !m.due));
@@ -952,7 +1122,7 @@ async function renderLog() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  GO = setupTabs(id => { if (id === "log") renderLog(); if (id === "about") renderAbout(); if (id === "photo") renderPhoto(); });
+  GO = setupTabs(id => { if (id === "log") renderLog(); if (id === "about") renderAbout(); if (id === "photo") renderPhoto(); if (id === "perf") renderPerf(); });
   api("GET", "/api/reports-sample").then(x => { RP.samples = x.items; if (!$("#tab-photo").hidden) renderPhoto(); }).catch(() => {});
   $("#n-run").addEventListener("click", runNew);
   $("#n-next").addEventListener("click", () => flowGo(2));

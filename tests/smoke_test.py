@@ -128,7 +128,7 @@ def checks(c):
     yield f"재난문자 → 수시평가 필요 {ap['added']}건(두 번 눌러도 한 번만)", ap["added"] > 0 and ap2["added"] == 0 and any(r.get("kind") == "재난문자" for r in rf2["reassess"])
     t2 = c.call("GET", f"/api/assess/{rf['id']}/tbm")["lines"]
     yield "TBM에 날씨·작업 중지·재난문자", any("체감온도" in x for x in t2) and any("특보가 풀린 뒤" in x for x in t2) and any("재난문자" in x for x in t2)
-    yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 9
+    yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 12
     # 작업 고르기 → 위험요인 조회 → TBM 일지 → 위험성평가
     st = c.call("GET", "/api/state")
     yield f"작업 분류 {len(st['catalog'])}단계 읽음", len(st["catalog"]) >= 30 and any(f["kind"] == "작업 분류" for f in st["kb"]["files"])
@@ -217,6 +217,51 @@ def checks(c):
         yield f"결과보고서 고친 내용으로 {fmt} 내려받기", d[:2] == b"PK"
     st3 = c.call("GET", "/api/state")
     yield "아차사고 목록에 처리 상태", next(i for i in st3["incidents"] if i["id"] == iid)["fu"]["status"] == "완료"
+    # 공종별 담당·결재(검토·합의·승인)
+    cfg = c.call("GET", "/api/safety-cfg")
+    yield "공종별 담당 표(작업 분류의 공종마다 한 줄)", len(cfg["owners"]) == len({x["cat"] for x in st3["catalog"]}) and cfg["reviewer"]
+    sids = [x["id"] for x in st3["catalog"] if x["cat"] == "전기설비"][:2]
+    ea = c.call("POST", "/api/assess", {"fac": "본부 청사", "dept": "시설운영팀", "work": "분전반 점검", "text": "분전반 정기 점검", "steps": sids})
+    own = next(o for o in cfg["owners"] if o["cat"] == "전기설비")
+    yield "결재선: 공종 담당 → 안전팀 → 협력부서 → 승인권자", [x["step"] for x in ea["approval"]["line"]] == ["작성", "검토", "합의", "승인"] and ea["approval"]["line"][0]["name"] == own["name"] and ea["approval"]["stage"] == "작성 중"
+    r1 = c.call("POST", f"/api/assess/{ea['id']}/approve", {"action": "next"})
+    yield "검토 요청 → '검토 대기'", r1["approval"]["stage"] == "검토 대기"
+    rj = c.call("POST", f"/api/assess/{ea['id']}/approve", {"action": "reject", "memo": "검전 절차 보완"})
+    yield "안전팀 반려 → 다시 작성 전에는 진행 막음", rj["approval"]["stage"] == "반려" and c.status("POST", f"/api/assess/{ea['id']}/approve", {"action": "next"}) == 400
+    c.call("POST", f"/api/assess/{ea['id']}/approve", {"action": "reset"})
+    for _ in range(3):
+        r2 = c.call("POST", f"/api/assess/{ea['id']}/approve", {"action": "next"})
+    yield "감소대책이 남은 고위험 평가는 승인 막음", r2["approval"]["stage"] == "승인 대기" and (r2["stats"]["ready"] or c.status("POST", f"/api/assess/{ea['id']}/approve", {"action": "next"}) == 400)
+    upd = [{"code": i["code"], "measures": [{"done": True} for _ in i["measures"]]} for i in r2["items"]]
+    c.call("POST", f"/api/assess/{ea['id']}/update", {"items": upd})
+    r3 = c.call("POST", f"/api/assess/{ea['id']}/approve", {"action": "next", "name": "승인권자"})
+    yield "승인 → 평가 확정·결재 이력", r3["approval"]["stage"] == "승인" and r3["status"] == "확정" and any(h["what"] == "승인" for h in r3["approval"]["history"])
+    yield "평가 목록에 결재 단계", next(x for x in c.call("GET", "/api/state")["assessments"] if x["id"] == ea["id"])["stage"] == "승인"
+    c.call("POST", "/api/safety-cfg", {"agree": ""})
+    eb = c.call("POST", "/api/assess", {"fac": "본부 청사", "dept": "시설운영팀", "work": "분전반 점검", "text": "분전반 정기 점검", "steps": sids})
+    yield "합의자를 비우면 합의 단계 건너뜀", [x["step"] for x in eb["approval"]["line"]] == ["작성", "검토", "승인"]
+    # 안전 활동 DB·성과
+    c.call("POST", f"/api/reports/{rp['id']}", {"status": "완료", "memo": "물기 제거·호스 정리"})
+    pm = c.call("GET", "/api/performance?unit=month")
+    pw = c.call("GET", "/api/performance?unit=week")
+    py = c.call("GET", "/api/performance?unit=year")
+    yield "안전 활동 DB: 평가 작성·승인·감소대책·TBM·제보·조치·아차사고", all(pm["by_kind"][k] >= 1 for k in ("위험성평가 작성", "평가 승인", "감소대책 완료", "TBM 실시", "사진 제보", "제보 조치 완료", "아차사고 등록", "아차사고 조치 완료"))
+    yield "연간 12구간·월간 주 단위·주간 7일", len(py["trend"]) == 12 and 4 <= len(pm["trend"]) <= 6 and len(pw["trend"]) == 7 and py["total"] >= pm["total"] >= pw["total"]
+    yield "추이 합계 = 기간 활동 수", sum(sum(t["counts"].values()) for t in pm["trend"]) == pm["total"]
+    yield "제보 처리 일수·결재 대기·공종별 실적", pm["reports"]["done"] >= 1 and pm["reports"]["avg_days"] is not None and any(w["id"] == eb["id"] for w in pm["waiting"]) is False and any(o["cat"] == "전기설비" and o["approved"] >= 1 for o in pm["by_owner"])
+    yield "성과 엑셀", c.call("POST", "/api/performance/xlsx", {"unit": "year"}, raw=True)[:2] == b"PK"
+    yield "기준일 형식 검사", c.status("GET", "/api/performance?unit=month&anchor=abc") == 400
+    # 협력업체 DB
+    vd = c.call("POST", "/api/vendors/sample")
+    hk = next((x for x in vd["vendors"] if "한결" in x["name"]), None)
+    yield "협력업체 DB: 엑셀 표·한글 글 보고서에서 업체 모음", vd["total"]["jobs"] == 11 and vd["total"]["vendors"] == 7 and hk and hk["count"] == 3 and hk["amount"] == 38600000
+    yield "같은 업체 이름 표기 차이 합침·원문 위치", any(j["src"]["loc"] for j in hk["jobs"]) and any(x["name"] == "시원공조(주)" and x["jobs"][0]["start"] == "2026-07-01" for x in vd["vendors"])
+    yield "위험 작업(밀폐공간) → 협의 대상 표시", any("맑은물" in x["name"] and any(r["code"] == "H05" for r in x["risky"]) for x in vd["vendors"])
+    bad = c.call("POST", "/api/vendors/upload", {"files": [{"path": "메모.txt", "b64": _b64.b64encode("그냥 메모입니다".encode()).decode()}]})
+    yield "업체를 못 읽은 보고서는 이유 표시", bad["added"][0]["jobs"] == 0 and bad["added"][0]["error"]
+    yield "협력업체 엑셀", c.call("POST", "/api/vendors/xlsx", {}, raw=True)[:2] == b"PK"
+    d0 = vd["docs"][0]["id"]
+    yield "보고서 빼면 DB에서도 빠짐", c.call("DELETE", f"/api/vendors/{d0}")["total"]["jobs"] < 11
 
 
 def fake_law():

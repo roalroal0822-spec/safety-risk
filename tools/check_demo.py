@@ -72,6 +72,14 @@ def run_once():
                                              "text": "풀사이드 배수구 주변 물이 고여 미끄러움. 청소 호스가 바닥에 둔 채 있음"})
         got.append(("새 기능 · 사진 제보", "사진 위치로 찾은 시설·촬영 시각", "종합체육센터 · 2026-11-09 07:42", f"{rp['fac']} · {rp['shot']}"))
         got.append(("새 기능 · 사진 제보", "위험요인 후보", "미끄러운 바닥, 걸려 넘어짐", ", ".join({"H02": "미끄러운 바닥", "H13": "걸려 넘어짐"}.get(h["code"], h["code"]) for h in rp["hazards"])))
+        ap = c.call("GET", f"/api/assess/{a['id']}")["approval"]
+        got.append(("새 기능 · 결재(영상 미수록)", "조명 교체 결재선(전기설비 담당)", "작성 김도현 → 검토 오세린 → 합의 강태윤 → 승인 서경민",
+                    " → ".join(f"{x['step']} {x['name']}" for x in ap["line"])))
+        vd = c.call("POST", "/api/vendors/sample")
+        got.append(("새 기능 · 협력업체 DB(영상 미수록)", "시연 보고서 3개에서 읽은 업체·작업", "7곳·11건", f"{vd['total']['vendors']}곳·{vd['total']['jobs']}건"))
+        got.append(("새 기능 · 협력업체 DB(영상 미수록)", "위험 작업이 있는 업체(협의 대상)", "7곳", f"{vd['total']['risky']}곳"))
+        py = c.call("GET", "/api/performance?unit=year&anchor=2026-11-09")
+        got.append(("새 기능 · 안전 성과(영상 미수록)", "2026년 아차사고 등록(모의 4건 + 시연 1건)", "5건", f"{py['by_kind']['아차사고 등록']}건"))
         m = c.call("GET", "/api/feeds/messages")
         got.append(("5. 긴급재난문자", "재난문자(예시 자료)", "2건", f"{len(m['items'])}건"))
         br = c.call("GET", "/api/briefing")
