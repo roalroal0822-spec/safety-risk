@@ -238,7 +238,7 @@ function renderLookup() {
 
 function kindOf(t) {  // 서버(assess.kind_of)와 같은 규칙: 조회 화면에서만 씀
   const R = [["공학적", /방호|덮개|환기|칸막이|라바콘|차단봉|방염포|잠금|차단 후|떨어짐 방지|난간|국소배기/], ["관리적", /금지/],
-    ["보호구", /착용|보호구|마스크|보안경|보호안경|안전화|안전모/], ["제거", /제거|없애|운영시간 외|나눠 운반/], ["대체", /대차|고소작업대|작업발판|A형 사다리|바꿔/]];
+    ["보호구", /착용|보호구|마스크|보안경|보호안경|안전화|안전모/], ["제거", /제거|없애|치우|운영시간 외|나눠 운반/], ["대체", /대차|고소작업대|작업발판|A형 사다리|바꿔/]];
   for (const [k, rx] of R) if (rx.test(t)) return k;
   return "관리적";
 }
@@ -305,6 +305,105 @@ async function flowGo(n) {
   }
   if (GO) GO("new");
   $("#flow-steps").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+
+// ------------------------------------------------------------ 사진 위험 제보(전 직원 참여)
+const RP = { photo: null, filter: "all", open: null, last: null, data: null };
+async function renderPhoto() {
+  const box = $("#tab-photo");
+  const d = RP.data = await api("GET", "/api/reports");
+  const sm = d.summary;
+  const prev = el("div", { class: "rp-prev" }, RP.photo ? el("img", { src: `data:image/jpeg;base64,${RP.photo.b64}`, alt: "올릴 사진" }) : el("span", { class: "muted small" }, "사진을 고르면 여기 보입니다"));
+  const file = el("input", { type: "file", id: "rp-file", accept: "image/*", capture: "environment", hidden: true, onchange: async e => {
+    const f = e.target.files[0]; if (!f) return;
+    const [x] = await readFiles([f]); RP.photo = { name: x.path, b64: x.b64 }; renderPhoto();
+  } });
+  const text = el("input", { id: "rp-text", class: "wide", placeholder: "예: 풀사이드 배수구 주변 물이 고여 미끄러움", value: RP.text || "", oninput: e => { RP.text = e.target.value; } });
+  const who = el("input", { id: "rp-who", class: "wide", placeholder: "비우면 익명", value: RP.who || "", oninput: e => { RP.who = e.target.value; } });
+  const fac = el("select", { id: "rp-fac" }, el("option", { value: "" }, "사진 위치로 자동"), d.facilities.map(f => el("option", { value: f }, f)));
+  const send = el("button", { class: "primary big", id: "rp-send", disabled: !RP.photo, onclick: async () => {
+    busy(send, true, "사진 살펴보는 중");
+    try {
+      const r = await api("POST", "/api/reports", { photo: RP.photo, text: text.value, reporter: who.value, fac: fac.value });
+      RP.photo = null; RP.text = ""; RP.last = r.id; RP.open = r.id; toast("제보했습니다. 안전담당자가 확인합니다.");
+      await renderPhoto(); $("#rp-detail") && $("#rp-detail").scrollIntoView({ behavior: "smooth", block: "start" });
+    } finally { busy(send, false); }
+  } }, "제보하기");
+  const det = d.detector.ok ? `사물 인식: ${d.detector.name}` : `사물 인식 꺼짐(${d.detector.why})`;
+  const kpi = (lbl, v, cls) => el("div", { class: "stat" + (cls ? " " + cls : "") }, el("div", { class: "lbl" }, lbl), el("b", {}, v));
+  const items = d.items.filter(r => RP.filter === "all" || (RP.filter === "doing" ? ["확인", "조치 중"].includes(r.status) : r.status === RP.filter));
+  const max = Math.max(1, ...sm.by_fac.map(x => x[1]));
+  box.replaceChildren(
+    el("div", { class: "rp-top" },
+      el("div", { class: "panel rp-form" },
+        el("h2", {}, "본 위험, 사진 한 장으로 알려 주세요"),
+        el("p", { class: "small muted" }, "안전담당자만의 일이 아닙니다. 수영장·체육관·주차장·사무실 어디든, 위험해 보이면 찍어서 올리면 됩니다. 사진에 담긴 촬영 시각과 위치로 시설을 자동으로 찾고, 위험요인 후보를 골라 안전담당자에게 넘깁니다."),
+        el("div", { class: "rp-pick" }, file, el("label", { for: "rp-file", class: "rp-cam", role: "button", tabindex: 0, onkeydown: e => { if (e.key === "Enter") file.click(); } },
+          el("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", html: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>' }), "사진 찍기·고르기"), prev),
+        el("div", { class: "row small", style: { marginTop: "6px" } }, el("span", { class: "muted" }, "시연용 사진:"),
+          (RP.samples || []).map(x => el("button", { class: "small", onclick: () => { RP.photo = x; RP.text = x.name.startsWith("수영장") ? "풀사이드 배수구 주변 물이 고여 미끄러움. 청소 호스가 바닥에 둔 채 있음" : "진출입로 정산기 앞 차로에서 점검 중, 라바콘 없음"; renderPhoto(); } }, x.name.replace(/\.jpg$/, "")))),
+        el("label", { class: "f" }, "무엇이 위험한가요?(한 줄)"), text,
+        el("div", { class: "grid2" }, el("div", {}, el("label", { class: "f" }, "이름"), who), el("div", {}, el("label", { class: "f" }, "시설"), fac)),
+        el("div", { class: "row", style: { marginTop: "12px" } }, send, el("span", { class: "small muted" }, "위치 정보는 시설을 찾는 데만 쓰고, 저장하는 사진에서는 지웁니다."))),
+      el("div", { class: "panel rp-side" },
+        el("h3", {}, "참여 현황"),
+        el("div", { class: "kpis rp-kpis" }, kpi("이번 달 제보", sm.month + "건"), el("div", { class: "stat" }, el("div", { class: "lbl" }, "참여 직원"), el("b", {}, sm.people + "명"), sm.anon ? el("div", { class: "small muted" }, `익명 제보 ${sm.anon}건`) : null),
+          kpi("확인 기다림", sm.waiting + "건", sm.waiting ? "warn" : ""), kpi("조치 중", sm.doing + "건" + (sm.overdue ? ` · 기한 지남 ${sm.overdue}` : ""), sm.overdue ? "bad" : "")),
+        el("h3", {}, "시설별 제보"),
+        sm.by_fac.length ? sm.by_fac.map(([f, n]) => el("div", { class: "rp-bar" }, el("span", {}, f), el("i", { style: { width: `${n / max * 100}%` } }), el("b", {}, n))) : el("div", { class: "small muted" }, "아직 제보가 없습니다."),
+        sm.by_hz.length ? [el("h3", {}, "많이 나온 위험"), sm.by_hz.map(([h, n]) => el("div", { class: "small" }, `${h} ${n}건`))] : null,
+        el("p", { class: "small muted", style: { marginTop: "10px" } }, `판독: 설명 낱말 · ${d.llm ? "AI 판독(연결됨)" : "AI 판독(모델 미연결)"} · ${det}`, d.fac_demo ? " · 시설 위치는 시연용 좌표" : ""))),
+    el("div", { class: "panel" },
+      el("div", { class: "row" }, el("h2", { style: { margin: 0, flex: 1 } }, "안전담당 취합"),
+        el("div", { class: "seg", role: "group", "aria-label": "처리 상태" }, [["all", "전체"], ["접수", "확인 기다림"], ["doing", "조치 중"], ["완료", "완료"], ["반려", "반려"]].map(([k, l]) =>
+          el("button", { class: RP.filter === k ? "on" : "", onclick: () => { RP.filter = k; renderPhoto(); } }, l)))),
+      el("p", { class: "small muted" }, "후보 위험요인을 '맞음/아님'으로 확인하고 담당·기한을 정합니다. 작업으로 고쳐야 하면 위험성평가 초안을 바로 만들 수 있습니다."),
+      items.length ? el("div", { class: "rp-grid" }, items.map(r => el("button", { class: "rp-card" + (RP.open === r.id ? " on" : ""), onclick: () => { RP.open = RP.open === r.id ? null : r.id; renderPhoto(); } },
+        el("img", { src: `/api/photo/${r.photo}`, alt: "", loading: "lazy" }),
+        el("div", { class: "rp-meta" }, el("b", {}, r.fac || "시설 모름"), el("span", { class: "tag " + ({ "접수": "warn", "확인": "info", "조치 중": "info", "완료": "ok", "반려": "gray" })[r.status] }, r.status)),
+        el("div", { class: "small rp-t" }, r.text || "(설명 없음)"),
+        el("div", { class: "small muted" }, `${r.shot || r.at} · ${r.reporter}`),
+        el("div", {}, r.hazards.filter(h => h.ok !== false).slice(0, 3).map(h => el("span", { class: "chip" }, h.name)))))) : el("div", { class: "empty" }, "이 상태의 제보가 없습니다.")),
+    RP.open ? reportDetail(d.items.find(r => r.id === RP.open)) : null);
+}
+
+function reportDetail(r) {
+  if (!r) return null;
+  const up = async body => { await api("POST", `/api/reports/${r.id}`, body); await renderPhoto(); };
+  const stage = el("div", { class: "rp-stage" }, el("img", { src: `/api/photo/${r.photo}`, alt: "제보 사진" }),
+    r.objects.map(o => el("i", { class: "rp-box", style: { left: o.box[0] * 100 + "%", top: o.box[1] * 100 + "%", width: (o.box[2] - o.box[0]) * 100 + "%", height: (o.box[3] - o.box[1]) * 100 + "%" } }, el("em", {}, `${o.label} ${Math.round(o.score * 100)}%`))));
+  const owner = el("input", { type: "text", value: r.owner, placeholder: "담당(예: 시설팀 김○○)" });
+  const due = el("input", { type: "date", value: r.due });
+  const memo = el("input", { type: "text", class: "wide", value: r.memo, placeholder: "조치 내용(예: 배수구 덮개 교체, 미끄럼 방지 매트 설치)" });
+  const add = el("select", {}, el("option", { value: "" }, "빠진 위험요인 더하기…"), S.hazards.filter(h => !r.hazards.some(x => x.code === h.code)).map(h => el("option", { value: h.code }, `${h.code} ${h.name}`)));
+  return el("div", { class: "panel", id: "rp-detail" },
+    el("div", { class: "row" }, el("h2", { style: { margin: 0, flex: 1 } }, `${r.fac || "시설 모름"} 제보`), el("span", { class: "small muted" }, `${r.id} · 올린 날 ${r.at} · ${r.reporter}`)),
+    el("div", { class: "rp-split" }, stage,
+      el("div", {},
+        el("div", { class: "row", style: { gap: "6px" } },
+          el("span", { class: "chip" }, r.shot ? `촬영 ${r.shot}` : "촬영 시각 정보 없음"),
+          el("span", { class: "chip" }, r.fac ? `${r.fac} · ${r.fac_by || "직접 입력"}` : "시설 모름"),
+          r.gps ? el("span", { class: "chip", title: "저장한 사진에서는 위치 정보를 지웠습니다" }, "위치 정보 지움") : null),
+        el("p", {}, r.text || "(설명 없음)"),
+        el("div", { class: "small muted" }, "판독: " + r.engine.join(" + ") + (r.objects.length ? ` · 찾은 물건 ${r.objects.map(o => o.label).join(", ")}` : "")),
+        r.notes.map(n => el("div", { class: "small muted" }, "※ " + n)),
+        el("h3", {}, "위험요인 후보"),
+        r.hazards.length ? r.hazards.map(h => el("div", { class: "rp-hz" + (h.ok === true ? " yes" : h.ok === false ? " no" : "") },
+          el("div", { class: "row" }, el("b", { style: { flex: 1 } }, `${h.code} ${h.name}`), h.by.map(b => el("span", { class: "tag " + (b === "AI 판독" ? "warn" : b === "사물 인식" ? "info" : "gray") }, b)),
+            el("button", { class: "small" + (h.ok === true ? " primary" : ""), onclick: () => up({ hazards: [{ code: h.code, ok: h.ok === true ? null : true }] }) }, "맞음"),
+            el("button", { class: "small", onclick: () => up({ hazards: [{ code: h.code, ok: h.ok === false ? null : false }] }) }, "아님")),
+          h.what.length ? el("div", { class: "small muted" }, h.what.join(" / ")) : null,
+          el("div", { class: "small" }, h.measures.map(m => el("span", { class: "rp-m" }, kindTag(m.kind), " ", m.text))))) : el("div", { class: "q" }, "후보를 찾지 못했습니다. 사진을 보고 아래에서 위험요인을 더해 주세요."),
+        el("div", { class: "row", style: { marginTop: "8px" } }, add, el("button", { class: "small", onclick: () => add.value && up({ add_code: add.value }) }, "더하기")))),
+    el("div", { class: "row rp-act" }, el("b", {}, "처리"), owner, due, memo,
+      el("button", { onclick: () => up({ owner: owner.value, due: due.value, memo: memo.value, status: r.status === "접수" || r.status === "확인" ? "조치 중" : r.status }) }, "담당·기한 저장"),
+      el("button", { class: "primary", onclick: () => up({ memo: memo.value, status: "완료" }) }, "조치 완료"),
+      el("button", { onclick: () => up({ status: "반려" }) }, "반려"),
+      r.aid ? el("button", { onclick: () => openA(r.aid) }, "연결된 평가 열기")
+        : el("button", { class: "primary", onclick: async () => { const x = await api("POST", `/api/reports/${r.id}/assess`); await load(); openA(x.aid); } }, "위험성평가 초안 만들기"),
+      el("span", { style: { flex: 1 } }),
+      el("button", { class: "danger small", onclick: async () => { if (!confirm("이 제보를 지울까요? 되돌릴 수 없습니다.")) return; await api("DELETE", `/api/reports/${r.id}`); RP.open = null; renderPhoto(); } }, "삭제")));
 }
 
 // ------------------------------------------------------------ 목록·상세
@@ -849,7 +948,8 @@ async function renderLog() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  GO = setupTabs(id => { if (id === "log") renderLog(); if (id === "about") renderAbout(); });
+  GO = setupTabs(id => { if (id === "log") renderLog(); if (id === "about") renderAbout(); if (id === "photo") renderPhoto(); });
+  api("GET", "/api/reports-sample").then(x => { RP.samples = x.items; if (!$("#tab-photo").hidden) renderPhoto(); }).catch(() => {});
   $("#n-run").addEventListener("click", runNew);
   $("#n-next").addEventListener("click", () => flowGo(2));
   $("#n-match").addEventListener("click", flowMatch);

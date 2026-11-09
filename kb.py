@@ -31,6 +31,7 @@ class KB:
         self.root = root
         self.hazards = {}  # 코드 → {...}
         self.tasks = []
+        self.facilities = []  # 시설 위치: {name, addr, lat, lon, radius, src} (사진 위치로 시설 찾기)
         self.catalog = []  # 작업 단계: {id, cat, work, step, rows:[{situation, code}], words, src}
         self.incidents = []
         self.reg = None
@@ -95,6 +96,22 @@ class KB:
                                        "src": {"file": doc.relpath, "loc": loc, "quote": g(c_text)[:160]}})
                 n += 1
             self.files.append({"file": doc.relpath, "kind": "아차사고 기록", "rows": n})
+            return
+        c_lat, c_lon, c_fn = _col(h, r"위도"), _col(h, r"경도"), _col(h, r"^시설$|시설명")
+        if None not in (c_lat, c_lon, c_fn):
+            c_addr, c_rad = _col(h, r"주소"), _col(h, r"반경")
+            n = 0
+            for row, loc in zip(t["rows"], locs):
+                g = lambda i: str(row[i]).strip() if i is not None and i < len(row) else ""  # noqa: E731
+                try:
+                    la, lo = float(g(c_lat)), float(g(c_lon))
+                except ValueError:
+                    continue
+                if g(c_fn):
+                    self.facilities.append({"name": g(c_fn), "addr": g(c_addr), "lat": la, "lon": lo, "radius": _num(g(c_rad), 300),
+                                            "src": {"file": doc.relpath, "loc": loc, "quote": g(c_fn)}})
+                    n += 1
+            self.files.append({"file": doc.relpath, "kind": "시설 위치", "rows": n})
             return
         c_cat, c_step, c_sit, c_hc = _col(h, r"^분류$|대분류|공종"), _col(h, r"^단계$|세부작업"), _col(h, r"위험상황"), _col(h, r"위험요인코드")
         c_w = _col(h, r"^작업$|작업명|중분류")
@@ -219,6 +236,6 @@ class KB:
         return [c for c, h in self.hazards.items() if any(w in t for w in h["words"])]
 
     def summary(self):
-        return {"hazards": len(self.hazards), "tasks": len(self.tasks), "steps": len(self.catalog), "incidents": len(self.incidents),
+        return {"hazards": len(self.hazards), "tasks": len(self.tasks), "steps": len(self.catalog), "facilities": len(self.facilities), "incidents": len(self.incidents),
                 "reg": self.reg_doc.relpath if self.reg_doc else "", "files": self.files, "warnings": self.warnings,
                 "rules": list(self.basis.values())}

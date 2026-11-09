@@ -51,7 +51,7 @@ def checks(c):
     yield "화면 열기", c.call("GET", "/", raw=True)[:15].lower().startswith(b"<!doctype")
     s = c.call("GET", "/api/state")
     k = s["kb"]
-    yield f"기관 자료(위험요인 {k['hazards']}, 작업 {k['tasks']}, 아차사고 {k['incidents']})", k["hazards"] == 12 and k["tasks"] == 9 and k["incidents"] == 4
+    yield f"기관 자료(위험요인 {k['hazards']}, 작업 {k['tasks']}, 아차사고 {k['incidents']})", k["hazards"] == 14 and k["tasks"] == 9 and k["incidents"] == 4
     yield "판단 기준을 규정 조문에서 읽음", [r["value"] for r in k["rules"][:2]] == [6, 3] and all(r["basis"] for r in k["rules"][:2])
     lw = c.call("GET", "/api/laws/H01")
     yield "법제처 인증값 없으면 조문을 지어내지 않고 국가법령정보센터 링크만", not lw["live"] and not lw["items"] and lw["refs"][0]["url"].startswith("https://www.law.go.kr/") and "LAW_OC" in lw["note"]
@@ -128,7 +128,7 @@ def checks(c):
     yield f"재난문자 → 수시평가 필요 {ap['added']}건(두 번 눌러도 한 번만)", ap["added"] > 0 and ap2["added"] == 0 and any(r.get("kind") == "재난문자" for r in rf2["reassess"])
     t2 = c.call("GET", f"/api/assess/{rf['id']}/tbm")["lines"]
     yield "TBM에 날씨·작업 중지·재난문자", any("체감온도" in x for x in t2) and any("특보가 풀린 뒤" in x for x in t2) and any("재난문자" in x for x in t2)
-    yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 6
+    yield "원본 보호(sample_data 파일 수 그대로)", sum(1 for x in (ROOT / "sample_data").rglob("*") if x.is_file()) == 9
     # 작업 고르기 → 위험요인 조회 → TBM 일지 → 위험성평가
     st = c.call("GET", "/api/state")
     yield f"작업 분류 {len(st['catalog'])}단계 읽음", len(st["catalog"]) >= 30 and any(f["kind"] == "작업 분류" for f in st["kb"]["files"])
@@ -149,6 +149,24 @@ def checks(c):
     tb = c.call("GET", f"/api/assess/{fa['id']}/tbm")
     yield "TBM 일지: 오늘 작업 단계·위험요인과 대책", tb["sheet"]["steps"] and tb["sheet"]["rows"] and tb["sheet"]["rows"][0]["measures"][0]["kind"]
     raw = c.call("POST", f"/api/assess/{fa['id']}/tbm?fmt=md", {"n": 12}, raw=True)
+    # 사진 위험 제보(전 직원 참여)
+    import base64 as _b64
+    sys.path.insert(0, str(ROOT))
+    import photos as _ph
+    praw = (ROOT / "sample_data" / "사진" / "수영장_풀사이드.jpg").read_bytes()
+    rp = c.call("POST", "/api/reports", {"photo": {"name": "pool.jpg", "b64": _b64.b64encode(praw).decode()}, "text": "풀사이드 물이 고여 미끄러움, 호스가 바닥에 둔 채 있음 010-1234-5678", "reporter": "체육팀 이○○"})
+    yield "사진 제보: 촬영 시각·위치로 시설 자동(종합체육센터)", rp["fac"] == "종합체육센터" and rp["shot"].startswith("2026-11-09") and "사진 위치" in rp["fac_by"]
+    saved = c.call("GET", f"/api/photo/{rp['photo']}", raw=True)
+    yield "저장한 사진에서 위치 정보 지움", "lat" in _ph.exif(praw) and "lat" not in _ph.exif(saved) and "time" not in _ph.exif(saved)
+    yield "설명 낱말로 위험요인 후보(미끄러움·바닥 물건)·전화번호 가림", {"H02", "H13"} <= {h["code"] for h in rp["hazards"]} and "010-1234" not in rp["text"]
+    yield "확인 전 완료 막음", c.status("POST", f"/api/reports/{rp['id']}", {"status": "완료"}) == 400
+    rp2 = c.call("POST", f"/api/reports/{rp['id']}", {"hazards": [{"code": "H02", "ok": True}], "owner": "시설팀", "due": "2026-11-12"})
+    yield "후보 확인하면 '확인' 상태", rp2["status"] == "확인" and rp2["owner"] == "시설팀"
+    ra = c.call("POST", f"/api/reports/{rp['id']}/assess")
+    a3 = c.call("GET", f"/api/assess/{ra['aid']}")
+    yield "제보 → 위험성평가 초안(사진·확인한 위험요인·수시평가 사유)", a3["photos"] == [rp["photo"]] and any(i["code"] == "H02" for i in a3["items"]) and any(r.get("kind") == "사진 제보" for r in a3["reassess"]) and ra["report"]["status"] == "조치 중"
+    rl = c.call("GET", "/api/reports")
+    yield "참여 현황(제보·참여 직원·시설별)", rl["summary"]["total"] >= 1 and rl["summary"]["people"] >= 1 and rl["summary"]["by_fac"][0][0] == "종합체육센터"
     yield "TBM 일지 내려받기(참석자 12줄)", "| 12 |" in raw.decode("utf-8") and "위험요인과 대책" in raw.decode("utf-8")
     # 규칙 기반(모델 없음)에서도 새 기능이 동작
     br = c.call("GET", "/api/briefing")

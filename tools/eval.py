@@ -185,7 +185,7 @@ def eval_model_guard(kb, n=100):
         text = rnd.choice(texts)
         kind = rnd.choice(["code", "quote"])
         if kind == "code":
-            bad = {"code": rnd.choice(["H99", "H13", "X01", "H0", "위험"]), "quote": text[:6]}
+            bad = {"code": rnd.choice(["H99", "H31", "X01", "H0", "위험"]), "quote": text[:6]}
         else:
             bad = {"code": rnd.choice(list(kb.hazards)), "quote": rnd.choice(["안전모 미착용", "고압 전류 노출", "추락 위험이 큼", "가스 누출 의심"])}
         got, dropped = assess.model_hazards(kb, text, FakeLLM({"hazards": [bad]}), set())

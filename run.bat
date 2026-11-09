@@ -44,5 +44,11 @@ if errorlevel 1 (
   echo 주의: 라이브러리 설치에 실패했습니다. 인터넷 연결을 확인하세요. 한글·PDF·엑셀 파일 읽기가 동작하지 않을 수 있습니다.
   echo 인터넷이 막힌 PC라면 README의 '인터넷이 막힌 PC' 안내를 보세요.
 )
+rem 사진 제보 사물 인식(선택): 설치에 실패해도 앱은 그대로 동작합니다
+if exist wheels (
+  python -m pip install -q --disable-pip-version-check --no-index --find-links wheels -r requirements-vision.txt >nul 2>nul
+) else (
+  python -m pip install -q --disable-pip-version-check -r requirements-vision.txt >nul 2>nul
+)
 python run.py
 pause

@@ -6,7 +6,7 @@ services:
     name: safety-risk
     runtime: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt -r requirements-vision.txt
     startCommand: python run.py --no-browser
     healthCheckPath: /api/info
     envVars:

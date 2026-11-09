@@ -7,4 +7,5 @@ if [ ! -d .venv ]; then
 fi
 . .venv/bin/activate
 python -m pip install -q --disable-pip-version-check -r requirements.txt
+python -m pip install -q --disable-pip-version-check -r requirements-vision.txt 2>/dev/null || echo "사물 인식 부품은 설치하지 못했습니다(사진 제보는 설명 낱말·AI 판독으로 동작)"
 python run.py "$@"

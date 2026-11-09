@@ -20,12 +20,14 @@ import ai
 import assess
 import feeds
 import laws
+import photos as pics
 from kb import KB
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 HERE = Path(__file__).resolve().parent
 SAMPLE = HERE / "sample_data"
 CATALOG_FILE = "작업 분류(모의).xlsx"
+FAC_FILE = "시설 위치(모의).xlsx"
 IMG = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
 
 cfg = Config(HERE, {"app_title": "무사히(현장 위험성평가 AI)", "port": 8105})
@@ -37,7 +39,10 @@ app = App(HERE / "static")
 webcommon.register(app, cfg, llm, "무사히(현장 위험성평가 AI)", VERSION)
 ABOUT = {
     "lead": "위험요인 찾기·가능성·중대성·작업 시작 판정은 규칙과 기관 규정으로 하고, 모델은 낱말로 못 찾은 위험을 '제안'만 합니다. 모델이 없어도 같은 결과가 나옵니다.",
-    "pipeline": [("작업 설명 읽기", "높이·인원·체감온도·운영 중·실외 여부를 읽고, 개인정보는 먼저 가림"),
+    "pipeline": [("작업 고르기", "작업 분류(분류→작업→단계→위험 상황) 표에서 단계를 체크하거나, 말로 적은 설명의 낱말로 미리 고름"),
+                 ("위험요인 조회·TBM 일지", "고른 단계의 위험 상황·감소대책(제거→대체→공학적→관리적→보호구)·법령 근거를 3열로 보고, A4 TBM 일지로 인쇄"),
+                 ("사진 위험 제보(전 직원)", "누구나 사진 한 장과 한 줄 설명으로 제보, 촬영 시각·위치로 시설을 찾고 위치 정보는 지운 뒤 저장, 설명 낱말·AI 판독·사물 인식으로 후보를 내고 안전담당이 확인·조치·평가로 연결"),
+                 ("작업 설명 읽기", "높이·인원·체감온도·운영 중·실외 여부를 읽고, 개인정보는 먼저 가림"),
                  ("위험요인 찾기", "기관 위험요인 목록의 '찾는 낱말'로 찾고 근거 문구를 붙임"),
                  ("가능성·중대성", "조건과 최근 같은 작업의 아차사고로 조정, 조정마다 이유와 원본 행"),
                  ("규정 기준 판정", "위험성 6 이상은 작업 전 감소대책 완료(규정 조문에서 읽은 값)"),
@@ -60,11 +65,15 @@ ABOUT = {
                "작업 설명·아차사고에 적은 개인정보(전화·주민번호·계좌 등)는 저장·모델 전달 전에 ○○○로 가립니다.",
                "AI가 쓴 문장(답변·해설·종합 의견·TBM 문안·브리핑)에 근거 사실에 없는 숫자나 위험요인 코드가 하나라도 있으면 버리고 규칙 문장을 쓰며, 이유를 화면에 표시합니다.",
                "아차사고는 조치를 하나도 적지 않았거나 끝나지 않은 조치가 있으면 '완료'로 바꿀 수 없고, 결과보고서에는 산업재해조사표(법정 서식)를 대신하지 않는다는 안내를 넣습니다.",
+               "사진 제보의 위험요인은 모두 '후보'이며, 안전담당자가 '맞음'으로 확인한 것만 위험성평가로 넘어갑니다.",
+               "사진의 촬영 위치는 가장 가까운 시설을 찾는 데만 쓰고, 저장하는 사진에서는 위치·기기·시각 정보(Exif)를 지웁니다(회전 정보만 남김).",
+               "키 없이 쓰는 사물 인식(YOLOX-Nano, Apache-2.0)은 사람·차량·의자 같은 물건 80종만 알아보며, 물기·높이·전선 같은 위험 자체는 보지 못한다고 화면에 밝힙니다.",
                "공개 시연판은 화면에서 모델 설정을 바꿀 수 없고(키 유출 방지), 모델 호출은 1분에 40번으로 묶습니다."],
     "data": ["시연 자료(위험요인 목록·규정·작업·아차사고)는 모두 지어낸 모의자료입니다. 기관 자료로 바꾸면 그대로 동작합니다.",
              "날씨(기상청 단기예보·기상특보)와 긴급재난문자(행정안전부)는 키를 넣으면 실제 자료를, 키가 없거나 연결이 안 되면 예시 자료를 쓰고 화면에 출처를 표시합니다.",
              "관련 법령 조문은 법제처 국가법령정보 공동활용 Open API(인증값 LAW_OC)에서 받고, 인증값이 없으면 국가법령정보센터 링크만 보여 줍니다.",
              "시연용 사진은 그림이며, 실제 비전 모델의 정확도는 기관 PC에서 실측해야 합니다.",
+             "작업 분류·시설 위치(좌표)는 지어낸 모의자료입니다. 기관 표(분류·작업·단계·위험 상황·위험요인 코드 / 시설·위도·경도)를 넣으면 바뀝니다.",
              ("공개 시연판은 방문자 모두가 같은 시연 자료를 보며, 서버를 다시 시작하면 넣은 자료가 지워집니다. 기관 PC에 설치하면 자료는 그 PC의 작업 폴더(data)에만 저장되고 화면도 그 PC에서만 열립니다."
               if cfg.public else "자료는 이 PC의 작업 폴더(data)에만 저장되고, 화면은 이 PC에서만 열립니다.")],
 }
@@ -103,6 +112,10 @@ def reload():
     if not k.catalog and (SAMPLE / CATALOG_FILE).exists():  # 기관 작업 분류가 없으면 시연용 분류로 채움(화면에 표시)
         k.load_catalog_file(SAMPLE / CATALOG_FILE, "시연용 " + CATALOG_FILE)
         k.catalog_demo = True
+    k.fac_demo = False
+    if not k.facilities and (SAMPLE / FAC_FILE).exists():  # 기관 시설 위치 표가 없으면 시연용 좌표
+        k.load_catalog_file(SAMPLE / FAC_FILE, "시연용 " + FAC_FILE)
+        k.fac_demo = True
     k.incidents += [dict(i, codes=k.codes_in(i["text"])) for i in user_incidents()]
     STATE["kb"] = k
     return k
@@ -1025,6 +1038,203 @@ def inc_export(req):
 
 
 # ------------------------------------------------------------ 기관 자료
+
+# ------------------------------------------------------------ 사진 위험 제보(전 직원 참여)
+
+REPORT_ST = ["접수", "확인", "조치 중", "완료", "반려"]
+
+
+def reports():
+    return store.read("reports.json", {"items": []})["items"]
+
+
+def save_reports(items):
+    store.write("reports.json", {"items": items})
+
+
+def get_r(rid):
+    for r in reports():
+        if r["id"] == rid:
+            return r
+    raise HttpError(404, "제보를 찾지 못했습니다")
+
+
+def put_r(r):
+    items = reports()
+    for i, x in enumerate(items):
+        if x["id"] == r["id"]:
+            items[i] = r
+            break
+    else:
+        items.insert(0, r)
+    save_reports(items)
+    return r
+
+
+def _hz_view(k, code, by, what):
+    h = k.hazards[code]
+    return {"code": code, "name": h["name"], "type": h["type"], "by": [by], "what": [what] if what else [], "R": h["L"] * h["S"],
+            "measures": [{"text": m, "kind": assess.kind_of(m)} for m in h["measures"]], "ok": None}
+
+
+def analyze_photo(k, raw, b64, text):
+    """사진 한 장 + 한 줄 설명 → 위험요인 후보. 출처(설명 낱말·AI 판독·사물 인식)를 후보마다 남긴다."""
+    found, notes = {}, []
+
+    def add(code, by, what):
+        if code not in k.hazards:
+            return
+        if code in found:
+            found[code]["by"].append(by)
+            if what:
+                found[code]["what"].append(what)
+        else:
+            found[code] = _hz_view(k, code, by, what)
+    for code in k.codes_in(text):
+        w = next(w for w in k.hazards[code]["words"] if w in text)
+        add(code, "설명 낱말", f"설명 속 '{w}'")
+    engine = ["설명 낱말"]
+    if llm.enabled:
+        try:
+            got, dropped = assess.photo_hazards(k, [b64], llm)
+            for code, what in got:
+                add(code, "AI 판독", what)
+            engine.append("AI 판독")
+            notes += [f"AI 판독 제외: {d}" for d in dropped]
+        except Exception as e:  # 모델이 사진을 못 읽거나 연결 실패
+            notes.append(f"AI 판독을 하지 못했습니다({e})")
+    objs = None
+    try:
+        objs = pics.detect(raw)
+    except Exception as e:  # 사진 형식 오류 등
+        notes.append(f"사물 인식을 하지 못했습니다({type(e).__name__})")
+    if objs is not None:
+        engine.append("사물 인식")
+        for code, what in pics.object_hazards(objs):
+            add(code, "사물 인식", what)
+    elif not llm.enabled:
+        notes.append("AI가 연결되지 않았고 사물 인식 부품도 없어 설명 낱말로만 찾았습니다. 사진은 담당자가 직접 봅니다.")
+    return sorted(found.values(), key=lambda x: (-x["R"], x["code"])), objs or [], engine, notes
+
+
+@app.post("/api/reports")
+def report_new(req):
+    b = req.json or {}
+    p = b.get("photo") or {}
+    ext = Path(p.get("name") or "").suffix.lower()
+    if ext not in IMG or not p.get("b64"):
+        raise HttpError(400, "사진(png, jpg) 한 장을 넣어 주세요")
+    raw = base64.b64decode(p["b64"])
+    if len(raw) > 12 * 1024 * 1024:
+        raise HttpError(400, "사진은 12MB 이하로 넣어 주세요")
+    text, k1 = mask((b.get("text") or "").strip()[:300])
+    who, _ = mask((b.get("reporter") or "").strip()[:30])
+    k = kb()
+    ex = pics.exif(raw)
+    near = pics.nearest(k.facilities, ex["lat"], ex["lon"]) if "lat" in ex else None
+    fac = (b.get("fac") or "").strip()[:40]
+    fac_by = "직접 입력" if fac else ""
+    if not fac and near:
+        fac, fac_by = near["fac"], f"사진 위치(시설에서 {near['dist']}m)"
+    clean = pics.strip(raw)  # 촬영 위치·기기 정보는 지우고 저장
+    name = f"{uuid.uuid4().hex[:10]}{ext}"
+    PHOTOS.mkdir(parents=True, exist_ok=True)
+    (PHOTOS / name).write_bytes(clean)
+    hz, objs, engine, notes = analyze_photo(k, raw, base64.b64encode(clean).decode(), text)
+    if k1:
+        notes.insert(0, f"설명의 개인정보({', '.join(k1)})를 ○○○로 가렸습니다.")
+    if "lat" in ex and not near:
+        notes.append("사진 위치가 등록된 시설 반경 밖이라 시설을 직접 골라 주세요.")
+    r = {"id": "P" + uuid.uuid4().hex[:6], "at": date.today().isoformat(), "shot": ex.get("time", ""), "fac": fac, "fac_by": fac_by,
+         "gps": "lat" in ex, "reporter": who or "익명", "text": text, "photo": name, "hazards": hz, "objects": objs, "engine": engine,
+         "notes": notes, "status": "접수", "owner": "", "due": "", "memo": "", "aid": None,
+         "fac_demo": bool(near and getattr(k, "fac_demo", False))}
+    log("사진 위험 제보", f"{fac} {text[:30]}")
+    return put_r(r)
+
+
+@app.get("/api/reports")
+def report_list(req):
+    items = reports()
+    today = date.today().isoformat()
+    month = [r for r in items if r["at"][:7] == today[:7]]
+    by_fac, by_hz = {}, {}
+    for r in items:
+        by_fac[r["fac"] or "시설 모름"] = by_fac.get(r["fac"] or "시설 모름", 0) + 1
+        for h in r["hazards"]:
+            if h["ok"] is not False:
+                by_hz[h["name"]] = by_hz.get(h["name"], 0) + 1
+    st = pics.detector_status()
+    return {"items": items, "summary": {
+        "total": len(items), "month": len(month), "people": len({r["reporter"] for r in items if r["reporter"] != "익명"}),
+        "anon": sum(1 for r in items if r["reporter"] == "익명"),
+        "waiting": sum(1 for r in items if r["status"] == "접수"), "doing": sum(1 for r in items if r["status"] in ("확인", "조치 중")),
+        "done": sum(1 for r in items if r["status"] == "완료"),
+        "overdue": sum(1 for r in items if r["status"] in ("확인", "조치 중") and r["due"] and r["due"] < today),
+        "by_fac": sorted(by_fac.items(), key=lambda x: -x[1]), "by_hz": sorted(by_hz.items(), key=lambda x: -x[1])[:6]},
+        "detector": st, "llm": llm.enabled, "facilities": [f["name"] for f in kb().facilities], "fac_demo": getattr(kb(), "fac_demo", False)}
+
+
+@app.post("/api/reports/<rid>")
+def report_update(req):
+    r = get_r(req.params["rid"])
+    b = req.json or {}
+    if b.get("status") in REPORT_ST:
+        if b["status"] == "완료" and not any(h["ok"] for h in r["hazards"]) and not (b.get("memo") or r["memo"]):
+            raise HttpError(400, "완료하려면 확인한 위험요인이 있거나 조치 내용을 적어야 합니다")
+        r["status"] = b["status"]
+    for k in ("owner", "due", "memo", "fac"):
+        if k in b:
+            r[k] = mask(str(b[k] or "")[:200])[0]
+    for u in b.get("hazards") or []:
+        h = next((h for h in r["hazards"] if h["code"] == u.get("code")), None)
+        if h and "ok" in u:
+            h["ok"] = u["ok"] if u["ok"] in (True, False) else None
+    if b.get("add_code") and b["add_code"] in kb().hazards and not any(h["code"] == b["add_code"] for h in r["hazards"]):
+        h = _hz_view(kb(), b["add_code"], "담당자 추가", "")
+        h["ok"] = True
+        r["hazards"].append(h)
+    if r["status"] == "접수" and any(h["ok"] for h in r["hazards"]):
+        r["status"] = "확인"
+    log("사진 제보 처리", f"{r['id']} {r['status']}")
+    return put_r(r)
+
+
+@app.delete("/api/reports/<rid>")
+def report_delete(req):
+    save_reports([r for r in reports() if r["id"] != req.params["rid"]])
+    return {"ok": True}
+
+
+@app.post("/api/reports/<rid>/assess")
+def report_to_assess(req):
+    """제보에서 확인한 위험요인으로 위험성평가 초안을 만든다(사진 첨부, 수시평가 사유에 제보 기록)."""
+    r = get_r(req.params["rid"])
+    codes = [h["code"] for h in r["hazards"] if h["ok"]]
+    if not codes:
+        raise HttpError(400, "먼저 사진 속 위험요인을 '맞음'으로 확인해 주세요")
+    k = kb()
+    a = assess.make(k, r["fac"], "", f"사진 제보: {r['text'][:40] or '현장 위험'}", r["text"], photo_names=[r["photo"]])
+    for c in codes:
+        assess.add_item(k, a, c)
+    a["notes"].insert(0, f"사진 제보({r['at']}, {r['reporter']})에서 만든 평가입니다.")
+    a["reassess"].append({"kind": "사진 제보", "date": r["at"], "text": r["text"][:80] or "사진 제보", "incident": r["id"], "src": None, "basis": k.cite_topic(r"수시평가")})
+    put_a(a)
+    r["aid"] = a["id"]
+    if r["status"] in ("접수", "확인"):
+        r["status"] = "조치 중"
+    put_r(r)
+    log("사진 제보 → 위험성평가", f"{r['id']} → {a['id']}")
+    return {"aid": a["id"], "report": r}
+
+
+@app.get("/api/reports-sample")
+def report_samples(req):
+    out = []
+    for p in sorted((SAMPLE / "사진").glob("*.jpg")):
+        out.append({"name": p.name, "b64": base64.b64encode(p.read_bytes()).decode()})
+    return {"items": out}
+
 
 @app.post("/api/kb/upload")
 def kb_upload(req):
