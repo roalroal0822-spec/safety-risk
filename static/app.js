@@ -304,9 +304,17 @@ async function ask(q) {
 }
 
 // ------------------------------------------------------------ 평가표 미리보기·고치기·사진(좌우 분할)
-let REP = null;
+let REP = null, REPX = null;
+function sheetCtx() {
+  return { sel: "#rep-edit", title: "위험성평가표 고치기", url: `/api/assess/${CUR.id}/export`, open: openSheetEditor,
+    desc: `위험성평가 결과로 만든 평가표 초안입니다${S.llm ? ". AI가 쓴 문장은 평가 결과와 숫자·위험요인 코드를 대조해, 근거에 없는 것이 있으면 버리고 규칙 문장을 씁니다" : ". 모델을 연결하면 AI가 해설·종합 의견을 씁니다"}. 고치면 오른쪽 미리보기에 바로 반영됩니다.`,
+    tools: () => [el("button", { class: "small", onclick: e => aiExplainItems(e.currentTarget) }, S.llm ? "위험요인마다 AI 해설 넣기" : "위험요인 해설 넣기(규칙)"),
+      el("button", { class: "small", onclick: e => aiOpinion(e.currentTarget) }, S.llm ? "AI로 종합 의견 쓰기" : "종합 의견 넣기(규칙)"),
+      el("button", { class: "small", onclick: () => addPhotos(REP.length) }, "현장 사진 넣기(맨 끝)")] };
+}
 async function openSheetEditor(reset) {
-  if (!REP || reset) REP = (await api("GET", `/api/assess/${CUR.id}/preview`)).blocks;
+  if (!REP || reset || REPX?.sel !== "#rep-edit") REP = (await api("GET", `/api/assess/${CUR.id}/preview`)).blocks;
+  REPX = sheetCtx();
   drawReportEditor();
   $("#rep-edit").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -418,22 +426,18 @@ async function aiOpinion(btn) {
   } finally { busy(btn, false); }
 }
 function drawReportEditor() {
-  const host = $("#rep-edit");
+  const host = REPX && $(REPX.sel);
   if (!host || !REP) return;
   const nImg = REP.filter(b => b[0] === "image").length;
   const left = el("div", { class: "rep-left" },
-    el("div", { class: "rep-ai" }, el("b", {}, "AI 초안"),
-      el("p", { class: "small muted" }, `위험성평가 결과로 만든 평가표 초안입니다${S.llm ? ". AI가 쓴 문장은 평가 결과와 숫자·위험요인 코드를 대조해, 근거에 없는 것이 있으면 버리고 규칙 문장을 씁니다" : ". 모델을 연결하면 AI가 해설·종합 의견을 씁니다"}. 고치면 오른쪽 미리보기에 바로 반영됩니다.`),
-      el("div", { class: "row", style: { gap: "6px", flexWrap: "wrap" } },
-        el("button", { class: "small", onclick: e => aiExplainItems(e.currentTarget) }, S.llm ? "위험요인마다 AI 해설 넣기" : "위험요인 해설 넣기(규칙)"),
-        el("button", { class: "small", onclick: e => aiOpinion(e.currentTarget) }, S.llm ? "AI로 종합 의견 쓰기" : "종합 의견 넣기(규칙)"),
-        el("button", { class: "small", onclick: () => addPhotos(REP.length) }, "현장 사진 넣기(맨 끝)"))),
+    el("div", { class: "rep-ai" }, el("b", {}, "AI 초안"), el("p", { class: "small muted" }, REPX.desc),
+      el("div", { class: "row", style: { gap: "6px", flexWrap: "wrap" } }, ...REPX.tools())),
     ...reportFields());
   const right = el("div", { class: "rep-right" }, el("div", { class: "rep-right-head small muted" }, `미리보기 · 블록을 누르면 왼쪽 칸으로 이동${nImg ? ` · 사진 ${nImg}장` : ""}`), el("div", { id: "rep-pv" }, reportPreview()));
   host.replaceChildren(el("div", { class: "panel" },
-    el("div", { class: "row" }, el("h2", { style: { flex: 1, margin: 0 } }, "위험성평가표 고치기"),
-      el("span", { class: "small muted" }, "내려받기:"), exportButtons(`/api/assess/${CUR.id}/export`, () => ({ blocks: REP })),
-      el("button", { class: "small", onclick: () => openSheetEditor(true) }, "처음 내용으로"),
+    el("div", { class: "row" }, el("h2", { style: { flex: 1, margin: 0 } }, REPX.title),
+      el("span", { class: "small muted" }, "내려받기:"), exportButtons(REPX.url, () => ({ blocks: REP })),
+      el("button", { class: "small", onclick: () => REPX.open(true) }, "처음 내용으로"),
       el("button", { class: "small", onclick: () => { REP = null; host.replaceChildren(); } }, "닫기")),
     el("div", { class: "rep-split" }, left, right)));
 }
@@ -467,10 +471,113 @@ function renderInc() {
       } }, "등록"),
       el("button", { onclick: () => { f.fac.value = "종합체육센터"; f.work.value = "수영장 염소 약품 투입"; f.text.value = "약품 투입기 호스가 빠져 약품이 바닥에 흘렀고, 닦다가 냄새를 맡고 기침함. 환기팬이 꺼져 있었음"; f.result.value = "다침 없음(휴식)"; } }, "예시 채우기")),
     out));
+  const stTag = f => el("span", { class: "tag " + (f.status === "완료" ? "ok" : f.status === "조치 중" ? "warn" : "gray") }, f.status + (f.open ? ` · 남은 조치 ${f.open}` : ""));
   box.append(el("div", { class: "panel" }, el("h3", {}, `아차사고 기록 ${S.incidents.length}건`),
-    el("table", { class: "t" }, el("tr", {}, ["발생일", "시설", "작업", "내용", "분류", "출처"].map(h => el("th", {}, h))),
+    el("p", { class: "small muted" }, "'조치·결과보고'를 누르면 조치 기록·조치 전후 사진을 남기고, 결과보고서를 미리 보며 고쳐 한글·워드로 받습니다."),
+    el("div", { class: "tbl-scroll" }, el("table", { class: "t" }, el("tr", {}, ["발생일", "시설", "작업", "내용", "분류", "처리", "출처", ""].map(h => el("th", {}, h))),
       S.incidents.map(i => el("tr", {}, el("td", {}, i.date), el("td", {}, i.fac), el("td", {}, i.work), el("td", {}, i.text),
-        el("td", {}, (i.codes || []).join(", ")), el("td", {}, i.src ? citeChips([i.src]) : el("span", { class: "tag info" }, "화면 등록")))))));
+        el("td", {}, (i.codes || []).join(", ")), el("td", {}, stTag(i.fu)), el("td", {}, i.src ? citeChips([i.src]) : el("span", { class: "tag info" }, "화면 등록")),
+        el("td", {}, el("button", { class: "small inc-open", onclick: () => openInc(i.id) }, "조치·결과보고"))))))));
+  box.append(el("div", { id: "inc-detail" }), el("div", { id: "inc-rep" }));
+  if (INC) drawInc();
+  if (INC && REP && REPX?.sel === "#inc-rep") drawReportEditor();
+}
+
+// ------------------------------------------------------------ 아차사고 조치·결과보고
+let INC = null;
+async function openInc(id) {
+  INC = await api("GET", `/api/incidents/${id}`);
+  if (REPX?.sel === "#inc-rep") REP = null;
+  drawInc();
+  $("#inc-detail").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+async function saveInc(patch, msg) {
+  INC = await api("POST", `/api/incidents/${INC.incident.id}/followup`, patch);
+  S = await api("GET", "/api/state");
+  renderInc(); renderDash();
+  if (msg) toast(msg);
+}
+function drawInc() {
+  const host = $("#inc-detail");
+  if (!host || !INC) return;
+  const { incident: i, followup: f, hazards, related } = INC;
+  const acts = f.actions.map(m => ({ ...m }));
+  const rows = el("div");
+  const drawActs = () => rows.replaceChildren(...acts.map((m, n) => el("div", { class: "row inc-act", style: { gap: "8px", alignItems: "center", marginBottom: "6px" } },
+    el("input", { type: "checkbox", checked: m.done, title: "완료", onchange: e => (m.done = e.target.checked) }),
+    el("input", { value: m.text, placeholder: "조치 내용", style: { flex: 3 }, oninput: e => (m.text = e.target.value) }),
+    el("input", { value: m.owner, placeholder: "담당", style: { flex: 1 }, oninput: e => (m.owner = e.target.value) }),
+    el("input", { type: "date", value: m.due, style: { flex: 1 }, oninput: e => (m.due = e.target.value) }),
+    m.completed ? el("span", { class: "small muted" }, "완료 " + m.completed) : null,
+    el("button", { class: "small danger", onclick: () => { acts.splice(n, 1); drawActs(); } }, "삭제"))));
+  drawActs();
+  const cause = el("textarea", { class: "wide", rows: 3, placeholder: "비워 두면 보고서에 규칙으로 만든 원인 초안이 들어갑니다" }, f.cause);
+  const body = () => ({ actions: acts.filter(m => m.text.trim()), cause: cause.value });
+  const photoBtn = stage => {
+    const inp = el("input", { type: "file", accept: "image/png,image/jpeg", multiple: true, hidden: true, onchange: async () => {
+      try {
+        await saveInc(body());
+        for (const x of await readFiles([...inp.files].slice(0, 4))) INC = await api("POST", `/api/incidents/${i.id}/photo`, { name: x.path, b64: x.b64, stage });
+        S = await api("GET", "/api/state"); renderInc(); toast(`조치 ${stage === "before" ? "전" : "후"} 사진을 넣었습니다`);
+      } catch (e) { toast(e.message, true); }
+    } });
+    return el("span", {}, el("button", { class: "small", onclick: () => inp.click() }, `+ 조치 ${stage === "before" ? "전" : "후"} 사진`), inp);
+  };
+  host.replaceChildren(el("div", { class: "panel inc-panel" },
+    el("div", { class: "row" }, el("h2", { style: { flex: 1, margin: 0 } }, `조치 기록 · ${i.fac} ${i.work}`),
+      el("span", { class: "small muted" }, "처리 상태"),
+      el("select", { id: "inc-status", onchange: async e => { try { await saveInc({ ...body(), status: e.target.value }, e.target.value === "완료" ? "완료했습니다. 같은 작업 평가의 감소대책에 반영했습니다" : "상태를 바꿨습니다"); } catch (er) { e.target.value = f.status; toast(er.message, true); } } },
+        ...["접수", "조치 중", "완료"].map(x => el("option", { value: x, selected: x === f.status }, x))),
+      el("button", { class: "small", onclick: () => { INC = null; host.replaceChildren(); } }, "닫기")),
+    el("p", { class: "small" }, el("b", {}, i.date + " "), i.text, i.result ? ` (결과: ${i.result})` : ""),
+    el("div", { class: "row", style: { gap: "6px", flexWrap: "wrap" } }, el("span", { class: "small muted" }, "분류한 위험요인"),
+      ...(hazards.length ? hazards.map(h => el("span", { class: "tag info" }, `${h.name}(${h.type})`)) : [el("span", { class: "tag gray" }, "없음")]),
+      el("span", { class: "small muted", style: { marginLeft: "10px" } }, "같은 작업 평가"),
+      ...(related.length ? related.map(a => el("span", { class: "chip", onclick: () => openA(a.id) }, `${a.fac} · ${a.work}`)) : [el("span", { class: "tag gray" }, "없음")])),
+    el("h3", {}, "조치"), rows,
+    el("div", { class: "row", style: { gap: "6px" } },
+      el("button", { class: "small", onclick: () => { acts.push({ text: "", owner: "", due: "", done: false }); drawActs(); } }, "+ 조치 추가"),
+      hazards.length ? el("button", { class: "small", title: "기관 위험요인 목록의 감소대책을 조치 칸에 넣습니다", onclick: () => {
+        const have = new Set(acts.map(m => m.text));
+        hazards.flatMap(h => h.measures.slice(0, 2)).filter(t => !have.has(t)).forEach(t => acts.push({ text: t, owner: "", due: "", done: false }));
+        drawActs(); } }, "위험요인 목록 대책으로 채우기") : null),
+    el("h3", {}, "원인"), cause,
+    el("h3", {}, `조치 전·후 사진 ${f.photos.length}장`),
+    el("div", { class: "row inc-photos", style: { gap: "10px", flexWrap: "wrap" } }, ...f.photos.map(p => el("figure", { class: "inc-ph" },
+      el("img", { src: "/api/photo/" + p.name, alt: "" }), el("figcaption", { class: "small" }, el("span", { class: "tag " + (p.stage === "before" ? "gray" : "ok") }, p.stage === "before" ? "조치 전" : "조치 후"), " " + (p.caption || ""),
+        el("button", { class: "icon-btn", title: "빼기", onclick: () => saveInc({ ...body(), photos: f.photos.filter(x => x.name !== p.name) }, "사진을 뺐습니다") }, "×"))))),
+    el("div", { class: "row", style: { gap: "6px", marginTop: "6px" } }, photoBtn("before"), photoBtn("after")),
+    el("div", { class: "row", style: { marginTop: "14px", gap: "8px" } },
+      el("button", { onclick: () => saveInc(body(), "저장했습니다") }, "저장"),
+      el("button", { class: "primary", id: "inc-rep-btn", onclick: async () => { await saveInc(body()); await openIncReport(true); } }, "결과보고서 미리보기·고쳐서 내려받기")),
+    el("p", { class: "small muted" }, "조치를 모두 끝내고 상태를 '완료'로 바꾸면, 완료한 조치가 같은 작업 위험성평가의 감소대책에 '완료'로 들어갑니다. 끝나지 않은 조치는 '오늘 작업 브리핑'에서 시작 전 조치로 표시됩니다.")));
+}
+function incCtx() {
+  const id = INC.incident.id;
+  return { sel: "#inc-rep", title: "아차사고 결과보고서 고치기", url: `/api/incidents/${id}/export`, open: openIncReport,
+    desc: `등록 내용·조치 기록·사진으로 만든 결과보고서 초안입니다${S.llm ? ". AI가 쓴 원인·재발 방지 문장은 등록 내용·조치·위험요인 목록과 숫자·코드·조문을 대조해, 근거에 없는 것이 있으면 버리고 규칙 문장을 씁니다" : ". 모델을 연결하면 AI가 원인·재발 방지 문장을 씁니다"}. 고치면 오른쪽 미리보기에 바로 반영됩니다.`,
+    tools: () => [el("button", { class: "small", onclick: e => incAI("cause", e.currentTarget) }, S.llm ? "AI로 원인 쓰기" : "원인 넣기(규칙)"),
+      el("button", { class: "small", onclick: e => incAI("prevent", e.currentTarget) }, S.llm ? "AI로 재발 방지 대책 쓰기" : "재발 방지 대책 넣기(규칙)"),
+      el("button", { class: "small", onclick: () => addPhotos(Math.max(0, REP.findIndex(b => b[0] === "h2" && /재발 방지/.test(b[1])))) }, "사진 넣기")] };
+}
+async function openIncReport(reset) {
+  if (!REP || reset || REPX?.sel !== "#inc-rep") REP = (await api("GET", `/api/incidents/${INC.incident.id}/preview`)).blocks;
+  REPX = incCtx();
+  drawReportEditor();
+  $("#inc-rep").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+async function incAI(part, btn) {
+  busy(btn, true, "쓰는 중");
+  try {
+    const r = await api("POST", `/api/incidents/${INC.incident.id}/ai`, { part });
+    const at = REP.findIndex(b => b[0] === "h2" && (part === "cause" ? /원인/ : /재발 방지/).test(b[1]));
+    if (at < 0) { toast("보고서에서 넣을 자리를 찾지 못했습니다", true); return; }
+    let e = at + 1;
+    while (e < REP.length && (part === "cause" ? REP[e][0] === "p" : REP[e][0] === "bullet")) e++;
+    REP.splice(at + 1, e - at - 1, ...(part === "cause" ? [["p", r.text]] : r.lines.map(x => ["bullet", x])));
+    toast(`${part === "cause" ? "원인" : "재발 방지 대책"}을 넣었습니다(${r.mode})` + (r.dropped ? " · " + r.dropped : ""));
+    drawReportEditor();
+  } finally { busy(btn, false); }
 }
 
 // ------------------------------------------------------------ 기준·자료

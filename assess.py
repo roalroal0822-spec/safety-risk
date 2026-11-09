@@ -282,6 +282,18 @@ def stats(a):
             "unconfirmed": sum(1 for i in a["items"] if not i["confirmed"])}
 
 
+def related(inc, assessments):
+    """이 아차사고와 같은 시설·같은 작업이고 위험요인이 겹치는 평가(수시평가 표시 기준과 같음)."""
+    out = []
+    for a in assessments:
+        codes = {i["code"] for i in a["items"]}
+        other_fac = inc["fac"] and a["fac"] and not (inc["fac"] in a["fac"] or a["fac"] in inc["fac"])
+        if any(r.get("incident") == inc["id"] for r in a["reassess"]) or (
+                set(inc.get("codes", [])) & codes and not other_fac and _overlap(a["work"], inc["work"])):
+            out.append(a)
+    return out
+
+
 def reassess_hits(kb, assessments, inc):
     """새 아차사고가 기존 평가에 해당하면 수시평가 필요 표시."""
     hits = []

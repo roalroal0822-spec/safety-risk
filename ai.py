@@ -202,7 +202,7 @@ LEVEL = {"stop": 0, "fix": 1, "care": 2, "go": 3}
 LABEL = {"stop": "작업 중지", "fix": "시작 전 조치", "care": "주의하며 진행", "go": "시작 가능"}
 
 
-def briefing(k, items, wx, msgs):
+def briefing(k, items, wx, msgs, fus=None):
     """작성 중·확정 평가마다 기상청 체감온도·특보, 긴급재난문자, 아차사고, 미완료 조치를 엮어 오늘 판정."""
     rows, facts = [], []
     act = feeds.active_warnings(wx)
@@ -235,6 +235,10 @@ def briefing(k, items, wx, msgs):
             lv = min(lv, "fix", key=LEVEL.get)
             why.append("작업 전 끝낼 조치 남음: " + ", ".join(st["blocked"]))
         incs = [r for r in a["reassess"] if r.get("kind") != "재난문자"]
+        todo = [m["text"] for r in incs for m in ((fus or {}).get(r.get("incident")) or {}).get("actions", []) if not m.get("done")]
+        if todo:
+            lv = min(lv, "fix", key=LEVEL.get)
+            why.append(f"아차사고 조치 미완료 {len(todo)}건: " + ", ".join(todo[:2]))
         if incs:
             lv = min(lv, "care", key=LEVEL.get)
             why.append(f"같은 작업 아차사고 {len(incs)}건(수시평가 필요)")

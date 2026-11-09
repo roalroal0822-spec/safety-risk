@@ -44,6 +44,7 @@ ABOUT = {
                  ("법령 원문(공공데이터)", "위험요인의 관련 기준(법령명·주제)으로 법제처 Open API에서 조문을 찾아 원문·시행일을 붙임, 평가표·해설·물어보기의 근거로 씀"),
                  ("날씨·재난문자", "기상청 체감온도·기상특보로 작업 시작 판정, 긴급재난문자와 겹치는 평가에 수시평가 표시"),
                  ("평가표·TBM", "평가표·TBM 문안·서명지, 아차사고가 나면 수시평가 표시"),
+                 ("아차사고 조치·결과보고", "조치·담당·기한·조치 전후 사진을 기록하고 결과보고서를 미리 보며 고쳐 내려받음, 조치 완료는 같은 작업 평가의 감소대책에, 미완료 조치는 오늘 작업 브리핑에 반영"),
                  ("오늘 작업 브리핑", "기상청 체감온도·특보, 재난문자, 아차사고, 미완료 조치를 평가마다 엮어 작업 중지·시작 전 조치·주의·시작 가능을 규칙으로 판정, AI는 우선순위 문장만"),
                  ("생성형 AI 문장(선택)", "물어보기(이어 묻기)·위험요인 해설·종합 의견·TBM 문안·문단 다듬기. 근거 사실에 없는 숫자·위험요인 코드가 있으면 버리고 규칙 문장")],
     "guards": ["가능성·중대성 조정과 작업 시작 판정은 모델이 하지 않고 규칙으로만 합니다.",
@@ -57,6 +58,7 @@ ABOUT = {
                "기상특보에 따른 작업 중지는 특보 종류와 작업 조건(실외·높은 곳)으로 규칙만으로 판정하고, 체감온도는 기상청 공개 식으로 계산합니다.",
                "작업 설명·아차사고에 적은 개인정보(전화·주민번호·계좌 등)는 저장·모델 전달 전에 ○○○로 가립니다.",
                "AI가 쓴 문장(답변·해설·종합 의견·TBM 문안·브리핑)에 근거 사실에 없는 숫자나 위험요인 코드가 하나라도 있으면 버리고 규칙 문장을 쓰며, 이유를 화면에 표시합니다.",
+               "아차사고는 조치를 하나도 적지 않았거나 끝나지 않은 조치가 있으면 '완료'로 바꿀 수 없고, 결과보고서에는 산업재해조사표(법정 서식)를 대신하지 않는다는 안내를 넣습니다.",
                "공개 시연판은 화면에서 모델 설정을 바꿀 수 없고(키 유출 방지), 모델 호출은 1분에 40번으로 묶습니다."],
     "data": ["시연 자료(위험요인 목록·규정·작업·아차사고)는 모두 지어낸 모의자료입니다. 기관 자료로 바꾸면 그대로 동작합니다.",
              "날씨(기상청 단기예보·기상특보)와 긴급재난문자(행정안전부)는 키를 넣으면 실제 자료를, 키가 없거나 연결이 안 되면 예시 자료를 쓰고 화면에 출처를 표시합니다.",
@@ -133,11 +135,18 @@ def put_a(a):
 
 # ------------------------------------------------------------ 상태
 
+def _fu_brief(fu):
+    fu = fu or {}
+    acts = fu.get("actions", [])
+    return {"status": fu.get("status", "접수"), "actions": len(acts), "open": sum(1 for m in acts if not m.get("done")), "photos": len(fu.get("photos", []))}
+
+
 @app.get("/api/state")
 def state(req):
     k = kb()
     today = date.today().isoformat()
     items = assessments()
+    fus = followups()
     rows = []
     for a in items:
         st = assess.stats(a)
@@ -148,7 +157,7 @@ def state(req):
                   "owner": m["owner"], "due": m["due"]}
                  for a in items for i in a["items"] if i["confirmed"] and i["level"] == "bad" for m in i["measures"] if not m["done"]]
     return {
-        "kb": k.summary(), "tasks": k.tasks, "incidents": sorted(k.incidents, key=lambda x: x["date"], reverse=True),
+        "kb": k.summary(), "tasks": k.tasks, "incidents": sorted([dict(i, fu=_fu_brief(fus.get(i["id"]))) for i in k.incidents], key=lambda x: x["date"], reverse=True),
         "periodic": {"basis": k.basis["periodic"], "year": today[:4],
                      "tasks": [dict(t, **assess.task_status(k, t, items, today[:4])) for t in k.tasks]},
         "learned": learned(),
@@ -610,14 +619,14 @@ def ask(req):
 
 @app.get("/api/briefing")
 def get_briefing(req):
-    r = ai.briefing(kb(), assessments(), feeds.weather(), feeds.messages())
+    r = ai.briefing(kb(), assessments(), feeds.weather(), feeds.messages(), followups())
     r["ai"] = STATE.get("brief_ai")
     return r
 
 
 @app.post("/api/briefing/ai")
 def briefing_ai(req):
-    r = ai.briefing(kb(), assessments(), feeds.weather(), feeds.messages())
+    r = ai.briefing(kb(), assessments(), feeds.weather(), feeds.messages(), followups())
     res = ai.guard(llm, "공공시설 안전 담당자에게 '오늘 작업 브리핑'을 공문체(~함, ~임) 4~6문장으로 쓰세요. 작업마다 정해진 판정(작업 중지·시작 전 조치·주의·시작 가능)을 그대로 따르고, "
                         "먼저 멈추거나 조치할 작업과 이유, 오늘 날씨·재난문자에서 챙길 점을 말하세요.", r["facts"], r["rule"], max_tokens=900)
     STATE["brief_ai"] = res
@@ -708,6 +717,243 @@ def add_incident(req):
     log("아차사고 등록", f"{inc['fac']} {text[:30]}" + (f" → 수시평가 필요 {len(hits)}건" if hits else ""))
     return {"incident": inc, "hits": [{"id": a["id"], "work": a["work"], "fac": a["fac"]} for a in alls if a["id"] in hits],
             "codes": [{"code": c, "name": k.hazards[c]["name"]} for c in inc["codes"]], "basis": k.cite_topic(r"수시평가"), "masked": hidden}
+
+
+# ------------------------------------------------------------ 아차사고 조치·결과보고
+
+FU_STATES = ("접수", "조치 중", "완료")
+
+
+def followups():
+    return store.read("followups.json", {"items": {}})["items"]
+
+
+def get_inc(iid):
+    for i in kb().incidents:
+        if i["id"] == iid:
+            return i
+    raise HttpError(404, "아차사고를 찾지 못했습니다")
+
+
+def get_fu(iid):
+    fu = followups().get(iid) or {}
+    return {"status": fu.get("status", "접수"), "cause": fu.get("cause", ""), "prevent": fu.get("prevent", []),
+            "actions": fu.get("actions", []), "photos": fu.get("photos", []), "applied": fu.get("applied", []), "updated": fu.get("updated", "")}
+
+
+def put_fu(iid, fu):
+    items = followups()
+    items[iid] = dict(fu, updated=date.today().isoformat())
+    store.write("followups.json", {"items": items})
+
+
+def _inc_hazards(inc):
+    k = kb()
+    return [k.hazards[c] for c in inc.get("codes", []) if c in k.hazards]
+
+
+def _inc_view(inc):
+    fu = get_fu(inc["id"])
+    rel = assess.related(inc, assessments())
+    return {"incident": inc, "followup": fu,
+            "hazards": [{"code": h["code"], "name": h["name"], "type": h["type"], "measures": h["measures"], "law": h["law"]} for h in _inc_hazards(inc)],
+            "related": [{"id": a["id"], "fac": a["fac"], "work": a["work"], "status": a["status"]} for a in rel],
+            "basis": kb().cite_topic(r"수시평가")}
+
+
+def _inc_facts(inc, fu):
+    f = [f"아차사고 {inc['date']} {inc['fac']} {inc['work']}: {inc['text']}" + (f" (결과: {inc['result']})" if inc.get("result") else "")]
+    for h in _inc_hazards(inc):
+        f.append(f"{h['code']} {h['name']}({h['type']}): 감소대책 {'; '.join(h['measures'])}" + (f", 관련 기준: {h['law']}" if h["law"] else ""))
+    f += [f"조치: {m['text']}" + (f" (담당 {m['owner']})" if m.get("owner") else "") + (" 완료" if m.get("done") else " 미완료") for m in fu["actions"]]
+    if fu["cause"]:
+        f.append(f"담당자가 적은 원인: {fu['cause']}")
+    f += [f"관련 위험성평가: {a['fac']} {a['work']}" for a in assess.related(inc, assessments())]
+    return f
+
+
+def _rule_cause(inc):
+    hz = _inc_hazards(inc)
+    names = ", ".join(h["name"] for h in hz) or "분류되지 않은 위험"
+    ms = [m for h in hz for m in h["measures"][:2]]
+    return (f"'{inc['work'] or '해당 작업'}'에서 {names} 위험이 드러난 사례임. 기록된 경위는 '{inc['text']}'임."
+            + (f" 위험요인 목록의 감소대책({'; '.join(ms)}) 중 지켜지지 않은 것이 있었는지 현장에서 확인해야 함." if ms else " 현장에서 원인을 확인해야 함."))
+
+
+def _rule_prevent(inc, fu):
+    done = {m["text"] for m in fu["actions"]}
+    out = [m["text"] + (" (완료)" if m.get("done") else " (진행 중)") for m in fu["actions"]]
+    out += [m for h in _inc_hazards(inc) for m in h["measures"][:3] if m not in done][:4]
+    out.append("같은 작업의 위험성평가를 수시평가로 다시 하고, 작업 전 안전점검회의(TBM)에서 이 사례를 공유함.")
+    return out
+
+
+def inc_blocks(inc):
+    fu = get_fu(inc["id"])
+    hz = _inc_hazards(inc)
+    rel = assess.related(inc, assessments())
+    blocks = [("title", "아차사고 조치 결과보고"),
+              ("table", ["발생일", "시설", "작업", "결과(피해)", "처리 상태"], [[inc["date"], inc["fac"], inc["work"], inc.get("result") or "", fu["status"]]], [2, 2, 4, 3, 1]),
+              ("h2", "1. 발생 경위"), ("p", inc["text"]),
+              ("h2", "2. 위험요인 분류")]
+    blocks += [("bullet", f"{h['name']}({h['type']})" + (f" · 관련 기준: {h['law']}" if h["law"] else "")) for h in hz] or [("bullet", "분류된 위험요인 없음(위험요인 목록의 찾는 낱말에 걸리지 않음)")]
+    if inc.get("src"):
+        blocks.append(("note", f"※ 원본 기록: {inc['src']['file']} {inc['src']['loc']}"))
+    blocks += [("h2", "3. 원인"), ("p", fu["cause"] or _rule_cause(inc)),
+               ("h2", "4. 조치 내용")]
+    if fu["actions"]:
+        blocks.append(("table", ["번호", "조치", "담당", "기한", "완료일", "상태"],
+                       [[str(n), m["text"], m.get("owner", ""), m.get("due", ""), m.get("completed", ""), "완료" if m.get("done") else "진행 중"]
+                        for n, m in enumerate(fu["actions"], 1)], [1, 7, 2, 2, 2, 1]))
+    else:
+        blocks.append(("p", "기록된 조치가 없습니다."))
+    pics = []
+    for ph in fu["photos"]:
+        p = PHOTOS / ph["name"]
+        if p.exists():
+            pics.append(("image", f"data:{IMG[p.suffix]};base64," + base64.b64encode(p.read_bytes()).decode(),
+                         f"조치 {'전' if ph.get('stage') == 'before' else '후'}" + (f" · {ph['caption']}" if ph.get("caption") else "")))
+    if pics:
+        blocks += [("h2", "5. 조치 전·후 사진")] + pics
+    n = 6 if pics else 5
+    blocks += [("h2", f"{n}. 재발 방지 대책")] + [("bullet", x) for x in (fu["prevent"] or _rule_prevent(inc, fu))]
+    blocks += [("h2", f"{n + 1}. 위험성평가 반영")]
+    blocks += [("bullet", f"{a['fac']} {a['work']}: " + ("완료한 조치를 감소대책에 반영함" if a["id"] in fu["applied"] else "수시평가 필요로 표시됨, 조치 완료 뒤 감소대책에 반영 예정"))
+               for a in rel] or [("bullet", "같은 작업의 위험성평가가 없습니다. 이 작업을 새로 평가하세요.")]
+    blocks += [("h2", "보고자 확인"), ("table", ["구분", "부서", "성명", "서명"], [["작성자", "", "", ""], ["확인자(안전 담당)", "", "", ""]], [2, 3, 3, 3]),
+               ("note", "※ 이 보고서는 기관 내부 결과보고용입니다. 근로자가 다치는 산업재해가 발생한 경우에는 산업안전보건법령에 따른 산업재해조사표를 별도로 작성·제출해야 합니다."),
+               ("note", f"※ 작성: 무사히(현장 위험성평가 AI). 경위·조치는 담당자가 입력한 내용이며, 원인·재발 방지 문장은 {'AI 초안을 담당자가 확인한 것' if llm.enabled else '규칙으로 만든 초안'}입니다.")]
+    return blocks
+
+
+@app.get("/api/incidents/<iid>")
+def inc_one(req):
+    return _inc_view(get_inc(req.params["iid"]))
+
+
+def _apply_actions(inc, fu):
+    """완료한 조치를 같은 작업 평가의 해당 위험요인 감소대책에 '완료'로 넣는다(이미 있으면 건너뜀)."""
+    done = [m for m in fu["actions"] if m.get("done")]
+    if not done:
+        return []
+    alls = assessments()
+    hit = []
+    words = lambda t: set(re.findall(r"[가-힣A-Za-z]{2,}", t))  # noqa: E731
+    k = kb()
+    for a in assess.related(inc, alls):
+        cand = [i for i in a["items"] if i["code"] in inc.get("codes", [])] or a["items"]
+        if not cand:
+            continue
+        for m in done:
+            # 조치 낱말과 위험요인 이름·감소대책 낱말이 가장 많이 겹치는 위험요인에 넣는다
+            it = max(cand, key=lambda i: len(words(m["text"]) & words(i["name"] + " " + " ".join(k.hazards.get(i["code"], {}).get("measures", [])))))
+            t = f"{m['text']} (아차사고 {inc['date']} 조치)"
+            if t not in {x["text"] for x in it["measures"]}:
+                it["measures"].append({"text": t, "done": True, "owner": m.get("owner", ""), "due": m.get("due", ""), "completed": m.get("completed") or date.today().isoformat()})
+        assess.rescore(kb(), a)
+        hit.append(a["id"])
+    save_all(alls)
+    return hit
+
+
+@app.post("/api/incidents/<iid>/followup")
+def inc_followup(req):
+    inc = get_inc(req.params["iid"])
+    b = req.json or {}
+    fu = get_fu(inc["id"])
+    if "status" in b:
+        if b["status"] not in FU_STATES:
+            raise HttpError(400, "상태는 접수·조치 중·완료 중 하나입니다")
+        fu["status"] = b["status"]
+    if "cause" in b:
+        fu["cause"] = mask(str(b["cause"] or "").strip())[0][:2000]
+    if "prevent" in b:
+        fu["prevent"] = [mask(str(x).strip())[0][:300] for x in b["prevent"] or [] if str(x).strip()][:12]
+    if "actions" in b:
+        old = {m["text"]: m for m in fu["actions"]}
+        acts = []
+        for m in b["actions"] or []:
+            t = mask(str(m.get("text") or "").strip())[0][:200]
+            if not t:
+                continue
+            d = bool(m.get("done"))
+            acts.append({"text": t, "owner": str(m.get("owner") or "")[:40], "due": str(m.get("due") or "")[:10], "done": d,
+                         "completed": (old.get(t, {}).get("completed") or date.today().isoformat()) if d else ""})
+        fu["actions"] = acts[:20]
+    if "photos" in b:  # 사진 빼기·설명 고치기(이미 올린 사진만)
+        have = {p["name"]: p for p in fu["photos"]}
+        fu["photos"] = [dict(have[p["name"]], caption=str(p.get("caption") or "")[:60], stage="before" if p.get("stage") == "before" else "after")
+                        for p in b["photos"] or [] if p.get("name") in have]
+    if fu["status"] == "완료":
+        if not fu["actions"]:
+            raise HttpError(400, "조치를 하나 이상 적어야 완료로 바꿀 수 있습니다")
+        if not all(m["done"] for m in fu["actions"]):
+            raise HttpError(400, "끝나지 않은 조치가 있어 완료로 바꿀 수 없습니다")
+        fu["applied"] = sorted(set(fu["applied"]) | set(_apply_actions(inc, fu)))
+    elif fu["actions"] and fu["status"] == "접수":
+        fu["status"] = "조치 중"
+    put_fu(inc["id"], fu)
+    log("아차사고 조치", f"{inc['fac']} {inc['text'][:24]} → {fu['status']}" + (f", 평가 {len(fu['applied'])}건 감소대책 반영" if fu["status"] == "완료" else ""))
+    return _inc_view(inc)
+
+
+@app.post("/api/incidents/<iid>/photo")
+def inc_photo(req):
+    inc = get_inc(req.params["iid"])
+    b = req.json or {}
+    fu = get_fu(inc["id"])
+    if len(fu["photos"]) >= 8:
+        raise HttpError(400, "사진은 8장까지 넣을 수 있습니다")
+    ext = Path(b.get("name") or "x.jpg").suffix.lower()
+    if ext not in IMG:
+        raise HttpError(400, "PNG·JPG 사진만 넣을 수 있습니다")
+    raw = base64.b64decode(b.get("b64") or "")
+    if not raw or len(raw) > 8 * 1024 * 1024:
+        raise HttpError(400, "사진은 8MB까지 넣을 수 있습니다")
+    name = uuid.uuid4().hex[:10] + (".jpg" if ext == ".jpeg" else ext)
+    PHOTOS.mkdir(parents=True, exist_ok=True)
+    (PHOTOS / name).write_bytes(raw)
+    fu["photos"].append({"name": name, "stage": "before" if b.get("stage") == "before" else "after", "caption": str(b.get("caption") or "")[:60]})
+    put_fu(inc["id"], fu)
+    log("아차사고 사진", f"{inc['fac']} {'조치 전' if b.get('stage') == 'before' else '조치 후'}")
+    return _inc_view(inc)
+
+
+@app.post("/api/incidents/<iid>/ai")
+def inc_ai(req):
+    """원인(cause)·재발 방지(prevent) 초안. 등록 내용·조치·위험요인 목록 사실에서만 쓰고 대조한다."""
+    inc = get_inc(req.params["iid"])
+    part = (req.json or {}).get("part")
+    fu = get_fu(inc["id"])
+    facts = _inc_facts(inc, fu)
+    if part == "cause":
+        res = ai.guard(llm, "아차사고 결과보고서의 '원인' 문단을 공문체(~함, ~임) 2~3문장으로 쓰세요. 기록된 경위와 위험요인 목록의 감소대책 중 지켜지지 않았을 수 있는 것을 짚되, "
+                            "사실에 없는 원인을 단정하지 말고 '확인 필요'로 쓰세요.", facts, _rule_cause(inc))
+    elif part == "prevent":
+        rule = _rule_prevent(inc, fu)
+        res = ai.guard(llm, "아차사고 결과보고서의 '재발 방지 대책'을 공문체(~함)로 3~5개 항목으로 쓰세요. 한 줄에 한 항목, 앞에 기호를 붙이지 마세요. 이미 한 조치와 위험요인 목록의 감소대책 안에서만 쓰세요.",
+                       facts, "\n".join(rule), max_tokens=800)
+        res["lines"] = [x.strip(" -·•*\t") for x in res["text"].splitlines() if x.strip(" -·•*\t")]
+    else:
+        raise HttpError(400, "part는 cause 또는 prevent입니다")
+    log("아차사고 보고 AI", f"{part} {res['mode']}")
+    return res
+
+
+@app.get("/api/incidents/<iid>/preview")
+def inc_preview(req):
+    return {"blocks": [list(b) for b in inc_blocks(get_inc(req.params["iid"]))]}
+
+
+@app.post("/api/incidents/<iid>/export")
+def inc_export(req):
+    inc = get_inc(req.params["iid"])
+    b = req.json or {}
+    blocks = _clean_blocks(b["blocks"]) if b.get("blocks") else inc_blocks(inc)
+    fmt = req.query.get("fmt", "hwpx")
+    data, ctype = export(blocks, fmt)
+    log("아차사고 결과보고 내보내기", f"{inc['fac']} {inc['work']}" + (" (화면에서 고침)" if b.get("blocks") else ""))
+    return file_response(data, f"아차사고_결과보고_{inc['fac']}_{inc['date']}.{fmt}", ctype)
 
 
 # ------------------------------------------------------------ 기관 자료

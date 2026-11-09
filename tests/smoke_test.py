@@ -142,6 +142,42 @@ def checks(c):
     import io, zipfile
     z = zipfile.ZipFile(io.BytesIO(hw))
     yield "평가표 미리보기에서 고친 내용·사진으로 한글 내려받기", "화면에서 고침" in z.read("Contents/section0.xml").decode() and any(n.startswith("BinData/") for n in z.namelist())
+    # 아차사고 조치·결과보고
+    la = c.call("POST", "/api/assess", {"fac": "종합체육센터", "work": "체육관 천장 조명(등기구) 교체", "text": "이동식 사다리로 높이 4m 등기구 안정기 교체. 혼자 작업"})
+    ni = c.call("POST", "/api/incidents", {"fac": "종합체육센터", "work": "체육관 천장 조명 교체", "text": "사다리 위에서 안정기를 떼다 손에 전기가 찌릿함. 차단기를 내리지 않은 회로였음", "result": "다침 없음"})
+    iid = ni["incident"]["id"]
+    v = c.call("GET", f"/api/incidents/{iid}")
+    yield "아차사고 조치: 위험요인 분류·같은 작업 평가 연결", {h["code"] for h in v["hazards"]} >= {"H03"} and la["id"] in [x["id"] for x in v["related"]]
+    yield "조치 없이 '완료'로 못 바꿈", c.status("POST", f"/api/incidents/{iid}/followup", {"status": "완료"}) == 400
+    acts = [{"text": "작업 전 해당 회로 차단기 내리고 잠금·표지 부착", "owner": "전기팀", "done": True}, {"text": "검전기로 무전압 확인 후 작업", "done": False}]
+    v = c.call("POST", f"/api/incidents/{iid}/followup", {"actions": acts})
+    br2 = {r["id"]: r for r in c.call("GET", "/api/briefing")["rows"]}
+    yield "미완료 조치 → 상태 '조치 중'·오늘 작업 브리핑 '시작 전 조치'", v["followup"]["status"] == "조치 중" and br2[la["id"]]["level"] in ("fix", "stop") and any("조치 미완료" in w for w in br2[la["id"]]["why"])
+    yield "끝나지 않은 조치가 있으면 '완료'로 못 바꿈", c.status("POST", f"/api/incidents/{iid}/followup", {"status": "완료"}) == 400
+    png = __import__("base64").b64encode((ROOT / "sample_data/사진/조명교체_사다리.png").read_bytes()).decode()
+    v = c.call("POST", f"/api/incidents/{iid}/photo", {"name": "전.png", "b64": png, "stage": "before", "caption": "차단기 미잠금"})
+    yield "조치 전 사진 넣기", v["followup"]["photos"][0]["stage"] == "before" and c.call("GET", f"/api/photo/{v['followup']['photos'][0]['name']}", raw=True)[:4] == b"\x89PNG"
+    yield "사진 형식 제한(아차사고)", c.status("POST", f"/api/incidents/{iid}/photo", {"name": "a.exe", "b64": "AA=="}) == 400
+    acts[1]["done"] = True
+    v = c.call("POST", f"/api/incidents/{iid}/followup", {"actions": acts, "status": "완료"})
+    la2 = c.call("GET", f"/api/assess/{la['id']}")
+    h03 = next(i for i in la2["items"] if i["code"] == "H03")
+    yield "조치 완료 → 같은 작업 평가의 감전 감소대책에 '완료'로 반영", la["id"] in v["followup"]["applied"] and sum("아차사고" in m["text"] and m["done"] for m in h03["measures"]) == 2
+    c.call("POST", f"/api/incidents/{iid}/followup", {"actions": acts, "status": "완료"})
+    la3 = c.call("GET", f"/api/assess/{la['id']}")
+    yield "두 번 완료해도 감소대책은 한 번만", sum("아차사고" in m["text"] for i in la3["items"] for m in i["measures"]) == 2
+    ca = c.call("POST", f"/api/incidents/{iid}/ai", {"part": "cause"})
+    pr = c.call("POST", f"/api/incidents/{iid}/ai", {"part": "prevent"})
+    yield "원인·재발 방지 초안(규칙)", ca["mode"] == "규칙 기반" and "감전" in ca["text"] and len(pr["lines"]) >= 3
+    pv = c.call("GET", f"/api/incidents/{iid}/preview")["blocks"]
+    heads = [b[1] for b in pv if b[0] == "h2"]
+    yield f"결과보고서 미리보기({len(pv)}블록: 경위·원인·조치·사진·재발 방지·평가 반영)", any("조치 전·후 사진" in h for h in heads) and any("재발 방지" in h for h in heads) and any(b[0] == "image" for b in pv) and any("산업재해조사표" in str(b[1]) for b in pv if b[0] == "note")
+    pv[0][1] = "아차사고 결과보고(화면에서 고침)"
+    for fmt in ("hwpx", "docx"):
+        d = c.call("POST", f"/api/incidents/{iid}/export?fmt={fmt}", {"blocks": pv}, raw=True)
+        yield f"결과보고서 고친 내용으로 {fmt} 내려받기", d[:2] == b"PK"
+    st3 = c.call("GET", "/api/state")
+    yield "아차사고 목록에 처리 상태", next(i for i in st3["incidents"] if i["id"] == iid)["fu"]["status"] == "완료"
 
 
 def fake_law():
@@ -273,6 +309,9 @@ def ai_checks(c, fl):
     yield "AI TBM 낭독 문안", "모델" in tb["mode"] and tb["lines"]
     po = c.call("POST", "/api/report/polish", {"text": "사다리 높이 4m 작업은 안전대를 착용함."})
     yield "평가표 문단 AI 다듬기(숫자 유지)", "모델" in po["mode"] and "4m" in po["text"]
+    ni = c.call("POST", "/api/incidents", {"fac": "종합체육센터", "work": "체육관 천장 조명 교체", "text": "사다리에서 안정기를 떼다 손에 전기가 찌릿함"})
+    ca = c.call("POST", f"/api/incidents/{ni['incident']['id']}/ai", {"part": "cause"})
+    yield "아차사고 원인 AI 초안(사실 대조 통과)", "모델" in ca["mode"]
     bi = c.call("POST", "/api/briefing/ai")
     yield "AI 오늘 작업 브리핑(사실 대조 통과)", "모델" in bi["mode"] and c.call("GET", "/api/briefing")["ai"]["text"] == bi["text"]
 
