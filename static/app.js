@@ -30,6 +30,8 @@ function renderDash() {
       el("div", { class: "stat warn" }, el("b", {}, d.overdue.length), el("span", { class: "lbl" }, "기한 지난 조치")),
       el("div", { class: "stat warn" }, el("b", {}, d.reassess.length), el("span", { class: "lbl" }, "수시평가 필요"))),
     el("p", { class: "small muted", style: { marginTop: "10px" } }, `기관 자료: 위험요인 ${S.kb.hazards}종 · 평가 대상 작업 ${S.kb.tasks}개 · 아차사고 ${S.kb.incidents}건 · 규정 ${S.kb.reg || "없음"}`)));
+  box.append(el("div", { class: "panel dash-perf", id: "dash-perf" }));
+  renderDashPerf();
   box.append(el("div", { id: "brief" }));
   renderBrief();
   box.append(el("div", { class: "panel", id: "msgs" }, el("div", { class: "row" }, el("h3", { style: { flex: 1, margin: 0 } }, "오늘의 긴급재난문자"),
@@ -48,20 +50,37 @@ function renderDash() {
         P.basis.basis ? basisChip(P.basis.basis) : null,
         el("button", { class: "small", onclick: () => download("/api/ledger-xlsx", {}) }, "평가 대장(엑셀)")),
       el("div", { class: "pbar", style: { marginTop: "10px" } }, el("i", { style: { width: (done / P.tasks.length * 100) + "%" } })),
-      el("table", { class: "t", style: { marginTop: "10px" } }, el("tr", {}, ["시설", "작업", "작업 주기", "상태", "마지막 평가", ""].map(h => el("th", {}, h))),
+      el("div", { class: "tbl-scroll" }, el("table", { class: "t", style: { marginTop: "10px" } }, el("tr", {}, ["시설", "작업", "작업 주기", "상태", "마지막 평가", ""].map(h => el("th", {}, h))),
         P.tasks.map((t, i) => el("tr", {}, el("td", {}, t.fac), el("td", {}, t.work), el("td", {}, t.cycle),
           el("td", {}, el("span", { class: "tag " + ST[t.level] }, t.state)), el("td", {}, t.date || "-"),
           el("td", {}, t.aid && t.level !== "bad" ? el("button", { class: "small", onclick: () => openA(t.aid) }, "열기")
-            : el("button", { class: "small primary", onclick: () => startTask(i) }, "평가하기")))))));
+            : el("button", { class: "small primary", onclick: () => startTask(i) }, "평가하기"))))))));
   }
   if (d.reassess.length) box.append(el("div", { class: "panel" }, el("h3", {}, "수시평가 필요(같은 작업의 아차사고 또는 오늘 재난문자)"),
     d.reassess.map(r => el("div", { class: "finding" }, el("i", { class: "dot warn" }), el("div", {}, el("div", { class: "ttl" }, `${r.fac} · ${r.work}`),
       el("button", { class: "small", onclick: () => openA(r.id) }, "평가 열기"))))));
   if (d.open_high.length) box.append(el("div", { class: "panel" }, el("h3", {}, "작업 전에 끝내야 할 조치"),
-    el("table", { class: "t" }, el("tr", {}, ["작업", "위험요인", "위험성", "조치", "담당", "기한"].map(h => el("th", {}, h))),
+    el("div", { class: "tbl-scroll" }, el("table", { class: "t" }, el("tr", {}, ["작업", "위험요인", "위험성", "조치", "담당", "기한"].map(h => el("th", {}, h))),
       d.open_high.map(x => el("tr", { style: { cursor: "pointer" }, onclick: () => openA(x.aid) }, el("td", {}, `${x.fac} · ${x.work}`), el("td", {}, x.item),
         el("td", {}, el("span", { class: "tag bad" }, x.R)), el("td", {}, x.measure), el("td", {}, x.owner || "-"),
-        el("td", { style: { color: x.due && x.due < S.today ? "var(--bad)" : "" } }, x.due || "-"))))));
+        el("td", { style: { color: x.due && x.due < S.today ? "var(--bad)" : "" } }, x.due || "-")))))));
+}
+
+async function renderDashPerf() {
+  const box = $("#dash-perf"); if (!box) return;
+  const p = await api("GET", `/api/performance?unit=year&anchor=${S.today}`);
+  const done = p.groups["안전조치 완료"], kpi = (lbl, v, sub) => el("div", { class: "dp-k" }, el("span", {}, lbl), el("b", {}, v), sub ? el("em", {}, sub) : null);
+  box.replaceChildren(
+    el("div", { class: "row" }, el("h2", { style: { margin: 0, flex: 1 } }, `${p.label} 안전 성과`),
+      p.imported ? el("span", { class: "tag gray" }, `가져온 실적 ${p.imported}건 포함(모의)`) : null,
+      p.total < 20 ? el("button", { class: "small", id: "dp-sample", onclick: async () => { await api("POST", "/api/activities/sample"); renderDashPerf(); } }, "시연 실적 넣기") : null,
+      el("button", { class: "small primary", onclick: () => GO("perf") }, "안전 성과 자세히")),
+    el("div", { class: "dp-kpis" },
+      kpi("올해 안전 활동", `${p.total}건`, `활동한 날 ${Object.keys(p.daily).length}일`),
+      kpi("끝낸 안전조치", `${done}건`, "감소대책·제보·아차사고 조치"),
+      kpi("TBM·점검·교육", `${p.groups["TBM·점검·교육"]}건`, ""),
+      kpi("참여 인원", `${p.people}명`, "실명 기준")),
+    el("div", { class: "dp-grid" }, el("div", {}, cumChart(p), gLegend()), el("div", {}, el("h3", { style: { marginTop: 0 } }, "올해 활동 구성"), donut(p))));
 }
 
 // ------------------------------------------------------------ 공공데이터: 날씨·재난문자

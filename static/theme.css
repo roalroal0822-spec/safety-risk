@@ -566,3 +566,9 @@ button.big { padding: 12px 22px; font-size: 16px; }
 .btn-like.small { padding: 5px 10px; font-size: 13px; }
 .pf-two > *, .pf-grid > *, .pf-grid3 > * { min-width: 0; }
 .pf-cc { font-size: 10.5px; font-weight: 700; fill: var(--ink-2); pointer-events: none; } .pf-cc.inv { fill: #fff; }
+.dash-perf .dp-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 14px 0; }
+.dp-k { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; display: flex; flex-direction: column; }
+.dp-k span { font-size: 13px; color: var(--muted); } .dp-k b { font-size: 28px; font-weight: 800; line-height: 1.2; color: var(--ink); } .dp-k em { font-style: normal; font-size: 12px; color: var(--faint); }
+.dp-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 24px; align-items: center; }
+.dp-grid > * { min-width: 0; }
+@media (max-width: 900px) { .dash-perf .dp-kpis { grid-template-columns: 1fr 1fr; } .dp-grid { grid-template-columns: 1fr; } }
