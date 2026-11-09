@@ -10,7 +10,7 @@ from core import webcommon
 from core.config import Config
 from core.export import export
 from core.loaders import load_bytes
-from core.llm import LLM
+from core.llm import LLM, LLMError
 from core.server import App, HttpError, Response, file_response
 from core.sources import safe_parts
 from core.pii import mask
@@ -240,8 +240,9 @@ def create(req):
     wx = feeds.weather() if b.get("use_weather") else None
     if wx and temp in (None, ""):
         temp = wx["feel"]
+    skip = [str(x) for x in (b.get("skip") or [])][:40]
     a = assess.make(kb(), (b.get("fac") or "").strip(), (b.get("dept") or "").strip(), work, text, temp,
-                    llm if llm.enabled else None, photos, names, steps)
+                    llm if llm.enabled else None, photos, names, steps, skip)
     if wx:
         set_weather(a, wx)
     if k1 or k2:
@@ -258,7 +259,32 @@ def catalog_match(req):
     if not text:
         raise HttpError(400, "작업 이름이나 설명을 먼저 적거나 말해 주세요")
     k = kb()
-    return {"works": k.match_steps(text), "conditions": assess.conditions(text), "codes": k.codes_in(text)}
+    temp = b.get("temp")
+    try:
+        temp = float(temp) if temp not in (None, "") else None
+    except ValueError:
+        temp = None
+    cond, ev = assess.condition_evidence(text, temp)
+    hz = [{"code": c, "name": k.hazards[c]["name"], "quote": q, "word": w} for c, q, w in assess.text_hazards(k, text, cond)]
+    return {"works": k.match_steps(text), "conditions": cond, "evidence": ev, "codes": k.codes_in(text), "hazards": hz}
+
+
+@app.post("/api/catalog/ai")
+def catalog_ai(req):
+    """1단계 'AI 다듬기': 낱말로 못 찾은 위험을 모델이 제안. 목록에 있는 코드이고 근거 문구가 설명에 그대로 있을 때만 받는다."""
+    b = req.json or {}
+    text, _ = mask(" ".join(str(b.get(k) or "") for k in ("work", "text")).strip())
+    if not text:
+        raise HttpError(400, "작업 설명을 먼저 적거나 말해 주세요")
+    if not llm.enabled:
+        return {"mode": "모델 미연결", "hazards": [], "dropped": []}
+    k = kb()
+    have = {str(x) for x in (b.get("have") or [])} | set(k.codes_in(text))
+    try:
+        got, dropped = assess.model_hazards(k, text, llm, have)
+    except LLMError as e:
+        return {"mode": "모델 응답 실패", "hazards": [], "dropped": [str(e)]}
+    return {"mode": "모델(근거 문구 대조 통과)", "hazards": [{"code": c, "name": k.hazards[c]["name"], "quote": q} for c, q in got], "dropped": dropped}
 
 
 @app.get("/api/assess/<aid>")

@@ -135,6 +135,11 @@ def checks(c):
     mt = c.call("POST", "/api/catalog/match", {"text": "수영장 염소 약품 투입, 풀사이드 물기"})
     main = next(w for w in mt["works"] if w["primary"])
     yield "말로 미리 고르기: 염소 약품 → 약품 투입 작업 단계", "약품" in main["work"] and len(main["steps"]) >= 2
+    ws = c.call("POST", "/api/catalog/match", {"text": "이동식 일자 사다리로 높이 4m까지 올라감. 오늘은 혼자 작업, 바닥은 왁스 청소 직후"})
+    yield "글쓰기 정리표: 조건마다 글에서 읽은 말(4m·혼자)과 위험요인 근거 낱말", ws["evidence"].get("height") == "4m" and ws["evidence"].get("alone") == "혼자" and {"H01", "H02"} <= {h["code"] for h in ws["hazards"]} and all(h["word"] for h in ws["hazards"])
+    sk = c.call("POST", "/api/assess", {"text": "이동식 일자 사다리로 높이 4m까지 올라감. 바닥은 왁스 청소 직후", "skip": ["H02"]})
+    yield "정리표에서 뺀 위험요인은 평가에 넣지 않음(고른 단계 없을 때)", "H01" in {i["code"] for i in sk["items"]} and "H02" not in {i["code"] for i in sk["items"]}
+    yield "AI 다듬기: 모델 없으면 '모델 미연결'로 빈 제안", c.call("POST", "/api/catalog/ai", {"text": "사다리 작업"})["mode"] == "모델 미연결"
     fa = c.call("POST", "/api/assess", {"fac": "종합체육센터", "text": "", "steps": main["steps"]})
     codes = {i["code"] for i in fa["items"]}
     yield "단계만 골라도 평가(작업 이름 채움·단계별 위험 상황)", fa["work"] and {"H06", "H08"} <= codes and all(i["steps"] for i in fa["items"] if i["by"] == "작업 분류")

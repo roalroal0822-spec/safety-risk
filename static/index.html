@@ -78,7 +78,7 @@
     <div class="panel">
       <h2>어떤 작업을 하나요?</h2>
       <p class="tagline">오늘도 당신이 무사히 돌아오도록.</p>
-      <p class="small muted">평소 말하듯 적거나 말하면, 아래 작업 분류에서 해당 작업 단계를 미리 골라 둡니다. 높이, 인원, 장비, 약품, 장소, 운영 중인지 같은 조건을 적을수록 정확해집니다.</p>
+      <p class="small muted">작업 설명을 평소 말하듯 적거나 말하면, 바로 아래에 작업·단계·조건·위험요인으로 정리하고 작업 분류에서 해당 단계를 골라 둡니다. 높이, 인원, 장비, 약품, 장소, 운영 중인지 같은 조건을 적을수록 정확해집니다.</p>
       <div class="row" style="margin-bottom:8px"><span class="small muted">정기 평가 대상 작업에서 고르기:</span><select id="task-pick"><option value="">직접 입력</option></select></div>
       <div class="grid3">
         <div><label class="f">시설</label><input id="n-fac" class="wide" placeholder="예: 종합체육센터"></div>
@@ -87,9 +87,14 @@
       </div>
       <div id="n-wx-box"></div>
       <label class="f">작업</label><input id="n-work" class="wide" placeholder="예: 체육관 천장 조명(등기구) 교체">
-      <label class="f">작업 설명</label>
-      <textarea id="n-text" class="wide" rows="3" placeholder='예: "이동식 일자 사다리로 높이 4m 등기구 안정기 교체. 혼자 작업, 바닥 왁스 청소 직후"'></textarea>
-      <div class="row" style="margin-top:6px"><button class="small" id="n-mic" hidden>말로 적기</button><button class="small primary" id="n-match">설명으로 작업 단계 미리 고르기</button><span id="n-match-out" class="small muted"></span></div>
+      <div class="ws" id="n-ws">
+        <div class="ws-top">
+          <div class="ws-h"><b>작업 설명</b><span class="small muted">평소 말하듯 길게 적거나 '말로 적기'로 말하세요. 적는 대로 아래에 정리됩니다.</span></div>
+          <textarea id="n-text" rows="6" aria-describedby="n-struct" placeholder='예: "체육관 천장 등기구 안정기를 갈아야 하는데, 이동식 일자 사다리로 높이 4m까지 올라가야 함. 오늘은 혼자 작업하고, 바닥은 아침에 왁스 청소를 해서 아직 미끄러움. 지난달에 비슷한 작업하다 사다리가 흔들린 적 있음"'></textarea>
+          <div class="row ws-tools"><button class="small" id="n-mic" hidden>말로 적기</button><button class="small" id="n-ai">AI 다듬기</button><span id="n-match-out" class="small muted"></span></div>
+        </div>
+        <div class="ws-bottom" id="n-struct" aria-live="polite"></div>
+      </div>
       <label class="f">현장 사진(선택, 최대 4장)</label>
       <div class="row"><input type="file" id="n-photo" accept=".png,.jpg,.jpeg" multiple><button class="small" id="n-sample-photo">시연용 사진 넣기</button><span id="n-photo-list" class="small muted"></span></div>
     </div>

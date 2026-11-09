@@ -10,7 +10,7 @@ const LV = { bad: "작업 전 조치 완료", warn: "작업 중 관리", ok: "�
 async function load() {
   S = await api("GET", "/api/state");
   renderDash(); renderList(); renderInc(); renderLib(); fillTasks();
-  if (FLOW.step === 1) renderCatalog();
+  if (FLOW.step === 1) { renderCatalog(); renderStruct(); }
 }
 
 function basisChip(b) {
@@ -135,6 +135,7 @@ function startTask(i) {
   $("#task-pick").value = i;
   $("#task-pick").dispatchEvent(new Event("change"));
   $("#n-text").value = "";
+  flowMatch();
   GO("new");
 }
 
@@ -146,13 +147,14 @@ async function runNew() {
 }
 
 // ------------------------------------------------------------ 작업 고르기 → 위험요인 조회 → TBM → 위험성평가
-const FLOW = { cat: null, work: null, sel: new Set(), aid: null, sig: "", mode: "risk", step: 1, n: 8, side: [] };
+const FLOW = { cat: null, work: null, sel: new Set(), aid: null, sig: "", mode: "risk", step: 1, n: 8, side: [],
+  auto: new Set(), off: new Set(), skip: new Set(), m: null, ai: null, mseq: 0 };  // auto: 설명에서 저절로 고른 단계, off: 사람이 뺀 단계, skip: 사람이 뺀 위험요인
 const KIND_ORDER = ["제거", "대체", "공학적", "관리적", "보호구"];
 const KIND_CLS = { "제거": "k1", "대체": "k2", "공학적": "k3", "관리적": "k4", "보호구": "k5" };
 function kindTag(k) { return k ? el("span", { class: "mk " + (KIND_CLS[k] || "k4"), title: "위험성 감소 우선순위: 제거 → 대체 → 공학적 → 관리적 → 보호구" }, k) : null; }
 function hzName(c) { const h = S.hazards.find(x => x.code === c); return h ? h.name : c; }
 function flowInputs() { return { fac: $("#n-fac").value, dept: $("#n-dept").value, work: $("#n-work").value, text: $("#n-text").value, temp: $("#n-temp").value }; }
-function flowSig() { return JSON.stringify([flowInputs(), [...FLOW.sel].sort(), PHOTOS.map(p => p.name), USEWX]); }
+function flowSig() { return JSON.stringify([flowInputs(), [...FLOW.sel].sort(), [...FLOW.skip].sort(), PHOTOS.map(p => p.name), USEWX]); }
 
 function renderCatalog() {
   const box = $("#cat-box");
@@ -169,7 +171,7 @@ function renderCatalog() {
     el("div", { class: "row" }, el("h3", { style: { margin: 0, flex: 1 } }, "작업 분류에서 단계 고르기"),
       S.catalog_demo ? el("span", { class: "tag warn", title: "기관 자료에 작업 분류 표가 없어 시연용 분류를 씁니다. '기준·자료'에서 기관 작업 분류 엑셀을 넣으면 바뀝니다." }, "시연용 분류") : null,
       el("span", { class: "small muted" }, `고른 단계 ${picked.length}개`),
-      picked.length ? el("button", { class: "small", onclick: () => { FLOW.sel.clear(); FLOW.side = []; renderCatalog(); } }, "모두 풀기") : null),
+      picked.length ? el("button", { class: "small", onclick: () => { FLOW.sel.clear(); FLOW.auto.clear(); FLOW.off.clear(); FLOW.side = []; renderCatalog(); renderStruct(); } }, "모두 풀기") : null),
     el("p", { class: "small muted" }, "분류 → 작업 → 단계 순서로 고르면 단계마다 기관 위험요인 목록의 위험 상황이 따라옵니다. 숫자는 그 단계의 위험 상황 수입니다."),
     el("div", { class: "cat-grid" },
       el("div", { class: "cat-col" }, el("div", { class: "cat-h" }, "분류"), cats.map(c => el("button", { class: "cat-it" + (c === FLOW.cat ? " on" : ""), onclick: () => { FLOW.cat = c; FLOW.work = null; renderCatalog(); } },
@@ -178,31 +180,93 @@ function renderCatalog() {
         el("span", {}, w), wcnt(w) ? el("b", { class: "cat-n" }, wcnt(w)) : null))),
       el("div", { class: "cat-col" }, el("div", { class: "cat-h" }, "단계"),
         steps.map(st => el("label", { class: "cat-step" + (FLOW.sel.has(st.id) ? " on" : "") },
-          el("input", { type: "checkbox", checked: FLOW.sel.has(st.id), onchange: e => { e.target.checked ? FLOW.sel.add(st.id) : FLOW.sel.delete(st.id); renderCatalog(); } }),
+          el("input", { type: "checkbox", checked: FLOW.sel.has(st.id), onchange: e => { stepToggle(st.id, e.target.checked); renderCatalog(); } }),
           el("span", { style: { flex: 1 } }, st.step), el("span", { class: "tag " + (st.rows.length >= 2 ? "warn" : "gray") }, `위험 ${st.rows.length}`))),
         el("div", { class: "row small", style: { marginTop: "6px" } },
-          el("button", { class: "small", onclick: () => { steps.forEach(st => FLOW.sel.add(st.id)); renderCatalog(); } }, "이 작업 단계 모두 고르기")))),
+          el("button", { class: "small", onclick: () => { steps.forEach(st => stepToggle(st.id, true)); renderCatalog(); } }, "이 작업 단계 모두 고르기")))),
     picked.length ? el("div", { class: "cat-picked" }, el("span", { class: "small muted" }, "고른 단계: "),
-      picked.map(st => el("span", { class: "chip" }, `${st.work} · ${st.step} `, el("button", { class: "x", "aria-label": `${st.step} 빼기`, onclick: () => { FLOW.sel.delete(st.id); renderCatalog(); } }, "×")))) : null,
+      picked.map(st => el("span", { class: "chip" }, `${st.work} · ${st.step} `, el("button", { class: "x", "aria-label": `${st.step} 빼기`, onclick: () => { stepToggle(st.id, false); renderCatalog(); } }, "×")))) : null,
     FLOW.side.length ? el("div", { class: "small muted", style: { marginTop: "6px" } }, "설명에 함께 나온 작업(고르지 않음): ",
-      FLOW.side.map(w => el("span", { class: "chip", title: "눌러서 이 작업 단계도 고르기", onclick: () => { w.steps.forEach(x => FLOW.sel.add(x)); FLOW.side = FLOW.side.filter(v => v !== w); renderCatalog(); } }, `+ ${w.work} ('${w.words.join("', '")}')`))) : null);
+      FLOW.side.map(w => el("span", { class: "chip", title: "눌러서 이 작업 단계도 고르기", onclick: () => { w.steps.forEach(x => stepToggle(x, true)); FLOW.side = FLOW.side.filter(v => v !== w); renderCatalog(); } }, `+ ${w.work} ('${w.words.join("', '")}')`))) : null);
 }
 
+// 1단계 글쓰기 칸: 적는 대로(0.5초 쉬면) 아래 정리표를 채운다. 정리는 기관 위험요인 목록의 낱말과 규칙으로 하고, 모델은 'AI 다듬기'에서만 쓴다.
+function stepToggle(id, on) {
+  if (on) { FLOW.sel.add(id); FLOW.off.delete(id); FLOW.auto.delete(id); }
+  else { FLOW.sel.delete(id); FLOW.auto.delete(id); FLOW.off.add(id); }
+  renderStruct();
+}
+
+let MATCH_T = null;
+function flowMatchSoon() { clearTimeout(MATCH_T); $("#n-match-out").textContent = "정리 중…"; MATCH_T = setTimeout(flowMatch, 500); }
+
 async function flowMatch() {
-  const btn = $("#n-match");
-  busy(btn, true, "찾는 중");
-  try {
-    const r = await api("POST", "/api/catalog/match", { work: $("#n-work").value, text: $("#n-text").value });
-    const main = r.works.find(w => w.primary);
-    if (!main) { $("#n-match-out").textContent = "작업 분류에서 맞는 작업을 찾지 못했습니다. 아래에서 직접 고르세요."; return; }
-    main.steps.forEach(x => FLOW.sel.add(x));
+  clearTimeout(MATCH_T);
+  const work = $("#n-work").value.trim(), text = $("#n-text").value.trim(), seq = ++FLOW.mseq;
+  FLOW.ai = null;
+  let r = null;
+  if (work || text) {
+    try { r = await api("POST", "/api/catalog/match", { work, text, temp: $("#n-temp").value }); } catch { return; }
+    if (seq !== FLOW.mseq) return;  // 더 최근 글이 이미 정리됨
+  }
+  FLOW.m = r;
+  if (!r) { FLOW.off.clear(); FLOW.skip.clear(); }
+  FLOW.auto.forEach(x => FLOW.sel.delete(x)); FLOW.auto.clear();
+  const main = r && r.works.find(w => w.primary);
+  if (main) {
+    main.steps.forEach(x => { if (!FLOW.sel.has(x) && !FLOW.off.has(x)) { FLOW.sel.add(x); FLOW.auto.add(x); } });
     const st = S.catalog.find(c => c.id === main.steps[0]);
-    FLOW.cat = st.cat; FLOW.work = st.work; FLOW.side = r.works.filter(w => !w.primary);
-    const c = r.conditions, cond = [c.height != null ? `높이 ${c.height}m` : null, c.alone ? "1인 작업" : null, c.people ? `${c.people}인 작업` : null,
-      c.temp != null ? `체감온도 ${c.temp}℃` : null, c.open ? "운영 중" : null, c.outdoor ? "실외" : null].filter(Boolean);
-    $("#n-match-out").textContent = `'${main.words.join("', '")}' → ${main.work} 단계 ${main.steps.length}개를 골랐습니다` + (cond.length ? ` · 읽은 조건: ${cond.join(", ")}` : "");
-    renderCatalog();
-  } finally { busy(btn, false); }
+    FLOW.cat = st.cat; FLOW.work = st.work;
+  }
+  FLOW.side = r ? r.works.filter(w => !w.primary) : [];
+  $("#n-match-out").textContent = r ? "규칙으로 정리(모델 없이도 같은 결과)" : "";
+  renderStruct(); renderCatalog();
+}
+
+const COND_LABEL = { height: v => `높이 ${v}m`, alone: () => "1인 작업", people: v => `${v}인 작업`, temp: v => `체감온도 ${v}℃`, open: () => "운영 중(이용객 있음)", outdoor: () => "실외" };
+
+function renderStruct() {
+  const box = $("#n-struct"), aiBtn = $("#n-ai");
+  if (aiBtn && S) { aiBtn.disabled = !S.llm || !FLOW.m; aiBtn.textContent = S.llm ? "AI 다듬기" : "AI 다듬기(모델 미연결)";
+    aiBtn.title = S.llm ? "낱말로 못 찾은 위험을 모델이 제안합니다. 설명에 그대로 있는 문구를 근거로 든 것만 받습니다." : "모델이 연결되지 않아 규칙 정리만 씁니다"; }
+  if (!box) return;
+  const r = FLOW.m;
+  if (!r) { box.replaceChildren(el("div", { class: "ws-empty" }, "위에 적으면 여기에 작업 · 단계 · 조건 · 위험요인이 정리됩니다.")); return; }
+  const ev = w => el("span", { class: "ws-ev" }, `‘${w}’`);
+  const main = r.works.find(w => w.primary);
+  const steps = main ? main.steps.map(id => S.catalog.find(c => c.id === id)).filter(Boolean) : [];
+  const conds = Object.keys(COND_LABEL).filter(k => k in r.conditions);
+  const row = (k, ...v) => el("div", { class: "ws-row" }, el("div", { class: "ws-k" }, k), el("div", { class: "ws-v" }, ...v));
+  const none = t => el("span", { class: "muted small" }, t);
+  const work = $("#n-work").value.trim();
+  const inSteps = code => S.catalog.filter(c => FLOW.sel.has(c.id) && c.rows.some(x => x.code === code)).map(c => c.step);
+  box.replaceChildren(
+    el("div", { class: "ws-bh" }, el("b", {}, "정리표"), el("span", { class: "small muted" }, "‘ ’는 글에서 읽은 말입니다. 틀린 칸은 ×로 빼고, 조건은 위 글을 고치면 바뀝니다.")),
+    row("작업", main ? [el("span", { class: "ws-val" }, main.work), " ", ...main.words.map(ev),
+        work !== main.work ? el("button", { class: "small ws-mini", onclick: () => { $("#n-work").value = main.work; renderStruct(); } }, "작업 이름으로 쓰기") : null]
+      : none("작업 분류에서 맞는 작업을 못 찾았습니다. 아래 표에서 직접 고르세요."),
+      FLOW.side.length ? el("div", { class: "small muted" }, "함께 나온 작업: ", FLOW.side.map(w => el("button", { class: "chip", onclick: () => { w.steps.forEach(x => stepToggle(x, true)); FLOW.side = FLOW.side.filter(v => v !== w); renderCatalog(); } }, `+ ${w.work}`))) : null),
+    row("단계", steps.length ? steps.map(st => FLOW.sel.has(st.id)
+        ? el("span", { class: "chip" }, st.step, " ", el("button", { class: "x", "aria-label": `${st.step} 빼기`, onclick: () => { stepToggle(st.id, false); renderCatalog(); } }, "×"))
+        : el("span", { class: "chip ws-off" }, st.step, " ", el("button", { class: "x", "aria-label": `${st.step} 다시 넣기`, onclick: () => { stepToggle(st.id, true); renderCatalog(); } }, "↺")))
+      : none("-")),
+    row("조건", conds.length ? conds.map(k => el("span", { class: "chip ws-cond" }, COND_LABEL[k](r.conditions[k]), " ", r.evidence[k] === "입력값" ? el("span", { class: "ws-ev" }, "(입력값)") : ev(r.evidence[k])))
+      : none("높이·인원·운영 중·실외·체감온도를 적으면 여기에 나옵니다.")),
+    row("위험요인", r.hazards.length ? r.hazards.map(h => FLOW.skip.has(h.code)
+        ? [el("span", { class: "chip ws-off", title: h.quote }, `${h.code} ${h.name}`, " ", el("button", { class: "x", "aria-label": `${h.name} 다시 넣기`, onclick: () => { FLOW.skip.delete(h.code); renderStruct(); } }, "↺")),
+           inSteps(h.code).length ? el("span", { class: "small muted" }, `(고른 단계 '${inSteps(h.code).join("', '")}'의 위험 상황으로는 남습니다. 빼려면 그 단계를 빼세요)`) : null]
+        : el("span", { class: "chip", title: h.quote }, el("b", {}, h.code), ` ${h.name} `, ev(h.word), " ", el("button", { class: "x", "aria-label": `${h.name} 빼기`, onclick: () => { FLOW.skip.add(h.code); renderStruct(); } }, "×")))
+      : none("글에서 찾은 위험 낱말이 없습니다. 고른 단계의 위험 상황은 다음 화면에서 함께 나옵니다.")),
+    FLOW.ai ? row("AI 제안", FLOW.ai.hazards.length
+        ? [FLOW.ai.hazards.map(h => el("span", { class: "chip ws-ai", title: h.quote }, el("b", {}, h.code), ` ${h.name} `, ev(h.quote))),
+           el("div", { class: "small muted" }, `${FLOW.ai.mode} · 모델이 연결돼 있으면 평가를 만들 때 같은 방식으로 다시 확인해 넣습니다.`)]
+        : none(FLOW.ai.mode === "모델 미연결" ? "모델이 연결되지 않았습니다." : `더 찾은 위험이 없습니다(${FLOW.ai.mode}${FLOW.ai.dropped.length ? " · 근거가 맞지 않아 뺀 제안 " + FLOW.ai.dropped.length + "건" : ""}).`)) : null);
+}
+
+async function flowAI(btn) {
+  busy(btn, true, "AI가 읽는 중");
+  try { FLOW.ai = await api("POST", "/api/catalog/ai", { work: $("#n-work").value, text: $("#n-text").value, have: FLOW.m ? FLOW.m.hazards.map(h => h.code) : [] }); renderStruct(); }
+  finally { busy(btn, false); renderStruct(); }
 }
 
 function setupMic() {
@@ -228,7 +292,7 @@ function lookupRows() {
   const t = `${$("#n-work").value} ${$("#n-text").value}`;
   for (const h of S.hazards) {
     const w = h.words.find(x => x && t.includes(x));
-    if (w && !have.has(h.code)) { rows.push({ where: "작업 설명", first: true, n: 1, situation: `설명 속 '${w}'`, code: h.code, src: h.src }); have.add(h.code); }
+    if (w && !have.has(h.code) && !FLOW.skip.has(h.code)) { rows.push({ where: "작업 설명", first: true, n: 1, situation: `설명 속 '${w}'`, code: h.code, src: h.src }); have.add(h.code); }
   }
   return rows;
 }
@@ -271,7 +335,7 @@ async function flowCreate() {
   const sig = flowSig();
   if (FLOW.aid && FLOW.sig === sig) return;
   const i = flowInputs();
-  const a = await api("POST", "/api/assess", Object.assign(i, { photos: PHOTOS, use_weather: USEWX, steps: [...FLOW.sel] }));
+  const a = await api("POST", "/api/assess", Object.assign(i, { photos: PHOTOS, use_weather: USEWX, steps: [...FLOW.sel], skip: [...FLOW.skip] }));
   FLOW.aid = a.id; FLOW.sig = sig;
   await load();
 }
@@ -1286,7 +1350,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   api("GET", "/api/reports-sample").then(x => { RP.samples = x.items; if (!$("#tab-photo").hidden) renderPhoto(); }).catch(() => {});
   $("#n-run").addEventListener("click", runNew);
   $("#n-next").addEventListener("click", () => flowGo(2));
-  $("#n-match").addEventListener("click", flowMatch);
+  $("#n-text").addEventListener("input", flowMatchSoon);
+  $("#n-work").addEventListener("input", flowMatchSoon);
+  $("#n-ai").addEventListener("click", e => flowAI(e.currentTarget));
   $$("#flow-steps button").forEach(b => b.addEventListener("click", () => flowGo(+b.dataset.s)));
   setupMic();
   $("#ask-btn").addEventListener("click", () => ask());
@@ -1297,10 +1363,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     $("#n-fac").value = "종합체육센터"; $("#n-dept").value = "체육사업팀"; $("#n-temp").value = "";
     $("#n-work").value = "체육관 천장 조명(등기구) 교체";
     $("#n-text").value = "이동식 일자 사다리로 높이 4m 등기구 안정기 교체. 혼자 작업, 바닥 왁스 청소 직후";
+    flowMatch();
   });
   $("#task-pick").addEventListener("change", e => {
     const t = S.tasks[e.target.value];
-    if (t) { $("#n-fac").value = t.fac; $("#n-dept").value = t.dept; $("#n-work").value = t.work; $("#n-text").focus(); }
+    if (t) { $("#n-fac").value = t.fac; $("#n-dept").value = t.dept; $("#n-work").value = t.work; $("#n-text").focus(); flowMatch(); }
   });
   $("#n-photo").addEventListener("change", async e => {
     PHOTOS = (await readFiles([...e.target.files].slice(0, 4))).map(f => ({ name: f.path, b64: f.b64 }));

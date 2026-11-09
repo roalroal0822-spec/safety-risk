@@ -35,15 +35,50 @@ def conditions(text, temp=None):
         c["temp"] = float(m.group(1) or m.group(2))
     if RX_ALONE.search(text or ""):
         c["alone"] = True
-    m = re.search(r"(\d+)\s*(?:인\s*1조|명이서|명이|명\s*작업|인\s*작업)", text or "")
+    m = RX_PEOPLE.search(text or "")
     if m and int(m.group(1)) >= 2:
         c["people"] = int(m.group(1))
         c.pop("alone", None)
-    if re.search(r"운영\s*중|이용객|회원|관람객|수강생", text or "") and not RX_NOBODY.search(text or ""):
+    if RX_OPEN.search(text or "") and not RX_NOBODY.search(text or ""):
         c["open"] = True
-    if re.search(r"실외|옥외|옥상|주차장 진출입|야외|땡볕", text or ""):
+    if RX_OUT.search(text or ""):
         c["outdoor"] = True
     return c
+
+
+RX_PEOPLE = re.compile(r"(\d+)\s*(?:인\s*1조|명이서|명이|명\s*작업|인\s*작업)")
+RX_OPEN = re.compile(r"운영\s*중|이용객|회원|관람객|수강생")
+RX_OUT = re.compile(r"실외|옥외|옥상|주차장 진출입|야외|땡볕")
+
+
+def condition_evidence(text, temp=None):
+    """conditions()가 읽은 조건마다 설명 속 어느 말에서 읽었는지(직접 넣은 체감온도는 '입력값')."""
+    c = conditions(text, temp)
+    rx = {"height": RX_HEIGHT, "temp": RX_TEMP, "alone": RX_ALONE, "people": RX_PEOPLE, "open": RX_OPEN, "outdoor": RX_OUT}
+    ev = {}
+    for k in c:
+        if k == "height":
+            m = max(RX_HEIGHT.finditer(text or ""), key=lambda x: float(x.group(1)))
+        else:
+            m = rx[k].search(text or "")
+        ev[k] = m.group(0).strip() if m and not (k == "temp" and temp not in (None, "")) else "입력값"
+    return c, ev
+
+
+def text_hazards(kb, full, cond, skip=()):
+    """설명 속 낱말로 찾은 위험요인: [(코드, 근거 구절, 낱말)]. 평가 만들기와 1단계 정리표가 같은 규칙을 쓴다."""
+    out = []
+    for code, h in kb.hazards.items():
+        if code in skip:
+            continue
+        q, w = _quote(full, h["words"])
+        if code == "H07" and not w and cond.get("outdoor") and cond.get("temp", 0) >= kb.values["heat_rest"]:
+            q, w = f"실외 작업, 체감온도 {cond['temp']:g}℃", "체감온도"
+        if code == "H12" and w and RX_NOBODY.search(full):
+            continue
+        if w:
+            out.append((code, q, w))
+    return out
 
 
 def _quote(text, words):
@@ -232,20 +267,15 @@ def photo_hazards(kb, photos_b64, llm):
 
 # ------------------------------------------------------------ 평가 만들기
 
-def make(kb, fac, dept, work, text, temp=None, llm=None, photos=None, photo_names=None, steps=None):
+def make(kb, fac, dept, work, text, temp=None, llm=None, photos=None, photo_names=None, steps=None, skip=()):
+    """skip: 1단계 정리표에서 사람이 '아님'으로 뺀 위험요인 코드(설명 낱말로 찾은 것만 빼고, 고른 작업 단계에서 온 것은 남김)."""
     full = ". ".join(x for x in (work, text) if x)
     cond = conditions(full, temp)
     items, have = [], set()
     picked = [s for s in (kb.step(x) for x in (steps or [])) if s]
-    for code, h in kb.hazards.items():
-        q, w = _quote(full, h["words"])
-        if code == "H07" and not w and cond.get("outdoor") and cond.get("temp", 0) >= kb.values["heat_rest"]:
-            q, w = f"실외 작업, 체감온도 {cond['temp']:g}℃", "체감온도"
-        if code == "H12" and w and RX_NOBODY.search(full):
-            continue
-        if w:
-            items.append(_item(kb, code, "낱말", q, w))
-            have.add(code)
+    for code, q, w in text_hazards(kb, full, cond, skip):
+        items.append(_item(kb, code, "낱말", q, w))
+        have.add(code)
     for st in picked:
         for r in st["rows"]:
             if r["code"] not in kb.hazards:
@@ -260,9 +290,10 @@ def make(kb, fac, dept, work, text, temp=None, llm=None, photos=None, photo_name
     engine = "규칙"
     if llm is not None and llm.enabled:
         try:
-            got, dropped = model_hazards(kb, full, llm, have)
+            got, dropped = model_hazards(kb, full, llm, have | set(skip))
             for code, q in got:
                 items.append(_item(kb, code, "모델", q))
+                have.add(code)
             if got:
                 engine = "규칙+모델"
             notes += [f"모델 제안 제외: {d}" for d in dropped]
