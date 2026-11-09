@@ -367,3 +367,13 @@ header.top.hero .kh-visual > .kh-photo { background: none; }
 .inc-ph figcaption { padding: 6px 8px; display: flex; gap: 4px; align-items: center; }
 .inc-ph figcaption .icon-btn { margin-left: auto; }
 .inc-act input[type=checkbox] { width: 18px; height: 18px; flex: none; }
+
+/* 표가 화면보다 넓으면 표만 옆으로 밀어 보게(모바일에서 '열기' 버튼이 밖으로 나가지 않게) */
+.tbl-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.tbl-scroll > table { min-width: 100%; }
+.list-t td:first-child { width: 1%; }
+.bulk-assign .row { gap: 8px; flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .tbl-scroll .list-t td, .tbl-scroll .list-t th { white-space: nowrap; }
+  #tab-lib table.t, #tab-log table.t, #detail table.t { display: block; overflow-x: auto; }
+}

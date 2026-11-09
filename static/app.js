@@ -130,11 +130,11 @@ function renderList() {
   box.innerHTML = "";
   if (!S.assessments.length) { box.append(el("div", { class: "panel empty" }, "평가가 없습니다.")); return; }
   box.append(el("div", { class: "panel" }, el("h2", {}, "평가 목록"),
-    el("table", { class: "t" }, el("tr", {}, ["평가일", "시설", "작업", "최고 위험성", "미완료 조치", "상태", ""].map(h => el("th", {}, h))),
-      S.assessments.map(a => el("tr", {}, el("td", {}, a.created), el("td", {}, a.fac), el("td", {}, a.work),
+    el("div", { class: "tbl-scroll" }, el("table", { class: "t list-t" }, el("tr", {}, ["", "평가일", "시설", "작업", "최고 위험성", "미완료 조치", "상태"].map(h => el("th", {}, h))),
+      S.assessments.map(a => el("tr", {}, el("td", {}, el("button", { class: "small", "aria-label": `${a.fac} ${a.work} 평가 열기`, onclick: () => openA(a.id) }, "열기")),
+        el("td", {}, a.created), el("td", {}, a.fac), el("td", {}, a.work),
         el("td", {}, el("span", { class: "tag " + (a.top >= 6 ? "bad" : a.top >= 3 ? "warn" : "ok") }, a.top)),
-        el("td", {}, a.stats.open), el("td", {}, a.status, a.reassess ? el("span", { class: "tag warn", style: { marginLeft: "6px" } }, "수시평가 필요") : null),
-        el("td", {}, el("button", { class: "small", onclick: () => openA(a.id) }, "열기")))))));
+        el("td", {}, a.stats.open), el("td", {}, a.status, a.reassess ? el("span", { class: "tag warn", style: { marginLeft: "6px" } }, "수시평가 필요") : null)))))));
 }
 
 async function openA(id) {
@@ -180,8 +180,27 @@ function renderDetail() {
       el("button", { onclick: () => download(`/api/assess/${a.id}/xlsx`, {}) }, "엑셀"),
       el("button", { onclick: showTBM }, "작업 전 회의(TBM)"),
       el("button", { class: a.status === "확정" ? "" : "primary", onclick: () => save({ status: a.status === "확정" ? "작성 중" : "확정" }) }, a.status === "확정" ? "확정 풀기" : "평가 확정"),
-      el("button", { class: "danger small", onclick: async () => { await api("DELETE", `/api/assess/${a.id}`); CUR = null; box.innerHTML = ""; await load(); } }, "삭제"))),
+      el("span", { style: { flex: 1 } }),
+      el("button", { class: "danger small", title: "이 평가를 지웁니다(되돌릴 수 없음)", onclick: async () => {
+        if (!confirm(`'${a.fac} · ${a.work}' 평가를 지울까요? 지우면 되돌릴 수 없습니다.`)) return;
+        await api("DELETE", `/api/assess/${a.id}`); CUR = null; box.innerHTML = ""; await load(); toast("평가를 지웠습니다");
+      } }, "평가 삭제"))),
     el("div", { id: "rep-edit" }));
+
+  const openM = a.items.reduce((n, it) => n + it.measures.filter(m => !m.done && (!m.owner || !m.due)).length, 0);
+  if (a.items.length) {
+    const who = el("input", { type: "text", placeholder: "담당(예: 시설팀 김○○)", "aria-label": "한꺼번에 넣을 담당", style: { width: "200px" } });
+    const when = el("input", { type: "date", "aria-label": "한꺼번에 넣을 기한" });
+    box.append(el("div", { class: "panel bulk-assign" }, el("div", { class: "row" },
+      el("b", {}, "담당·기한 한꺼번에 넣기"), el("span", { class: "small muted" }, `담당이나 기한이 빈 미완료 감소대책 ${openM}건`),
+      el("span", { style: { flex: 1 } }), who, when,
+      el("button", { class: "primary small", onclick: () => {
+        if (!who.value.trim() && !when.value) { toast("담당이나 기한을 적으세요", true); return; }
+        save({ items: a.items.map(it => ({ code: it.code, measures: it.measures.map(m => m.done ? {} : Object.assign({},
+          who.value.trim() && !m.owner ? { owner: who.value.trim() } : {}, when.value && !m.due ? { due: when.value } : {})) })) });
+        toast("빈 칸에 넣었습니다");
+      } }, "빈 칸에 넣기"))));
+  }
 
   for (const it of a.items) {
     const ls = k => el("select", { onchange: e => save({ items: [{ code: it.code, [k]: +e.target.value }] }) }, [1, 2, 3].map(v => el("option", { value: v, selected: it[k] === v }, v)));
@@ -600,7 +619,9 @@ function renderLib() {
   drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("over"));
   drop.addEventListener("drop", async e => { e.preventDefault(); drop.classList.remove("over"); await api("POST", "/api/kb/upload", { files: await readFiles(await filesFromDrop(e)) }); await load(); toast("반영했습니다"); });
-  box.append(el("div", { class: "panel" }, el("h2", {}, "기관 자료"), drop,
+  const pub = S.public;
+  box.append(el("div", { class: "panel" }, el("h2", {}, "기관 자료"),
+    pub ? el("div", { class: "q" }, "공개 시연판에서는 기관 자료를 바꿀 수 없습니다(방문자 모두가 같은 기준으로 보도록). 내려받아 설치하면 기관의 위험요인 목록·규정으로 바꿔 쓸 수 있습니다.") : drop,
     el("table", { class: "t", style: { marginTop: "12px" } }, el("tr", {}, ["파일", "종류", "건수"].map(h => el("th", {}, h))),
       S.kb.files.map(f => el("tr", {}, el("td", {}, f.file), el("td", {}, f.kind), el("td", {}, f.rows)))),
     S.kb.warnings.map(w => el("div", { class: "small", style: { color: "var(--warn)" } }, "※ " + w)),
@@ -674,5 +695,3 @@ async function toggleLaw(btn, code) {
   btn.disabled = false;
 }
 
-// 첫 화면 사진(static/img/hero.jpg)이 있으면 사진 배경으로
-(() => { const im = new Image(); im.onload = () => { const v = document.querySelector(".kh-visual"); if (v) { v.style.setProperty("--hero-photo", "url(/img/hero.jpg)"); v.classList.add("has-photo"); } }; im.src = "/img/hero.jpg"; })();

@@ -64,7 +64,8 @@ ABOUT = {
              "날씨(기상청 단기예보·기상특보)와 긴급재난문자(행정안전부)는 키를 넣으면 실제 자료를, 키가 없거나 연결이 안 되면 예시 자료를 쓰고 화면에 출처를 표시합니다.",
              "관련 법령 조문은 법제처 국가법령정보 공동활용 Open API(인증값 LAW_OC)에서 받고, 인증값이 없으면 국가법령정보센터 링크만 보여 줍니다.",
              "시연용 사진은 그림이며, 실제 비전 모델의 정확도는 기관 PC에서 실측해야 합니다.",
-             "자료는 이 PC의 작업 폴더(data)에만 저장되고, 화면은 이 PC에서만 열립니다."],
+             ("공개 시연판은 방문자 모두가 같은 시연 자료를 보며, 서버를 다시 시작하면 넣은 자료가 지워집니다. 기관 PC에 설치하면 자료는 그 PC의 작업 폴더(data)에만 저장되고 화면도 그 PC에서만 열립니다."
+              if cfg.public else "자료는 이 PC의 작업 폴더(data)에만 저장되고, 화면은 이 PC에서만 열립니다.")],
 }
 webcommon.register_about(app, HERE, ABOUT)
 
@@ -167,7 +168,7 @@ def state(req):
         "dash": {"assessments": len(items), "open_high": open_high[:30], "n_open_high": len(open_high),
                  "overdue": [x for x in open_high if x["due"] and x["due"] < today],
                  "reassess": [r for r in rows if r["reassess"]], "unconfirmed": sum(r["stats"]["unconfirmed"] for r in rows)},
-        "llm": llm.enabled, "today": today,
+        "llm": llm.enabled, "today": today, "public": cfg.public,
     }
 
 
@@ -960,6 +961,8 @@ def inc_export(req):
 
 @app.post("/api/kb/upload")
 def kb_upload(req):
+    if cfg.public:   # 공개 시연판: 방문자 모두가 같은 자료를 보므로 기준값(규정)이 바뀌지 않게 막는다
+        raise HttpError(403, "공개 시연판에서는 기관 자료를 바꿀 수 없습니다(다른 방문자의 판단 기준이 바뀌지 않도록). 내려받아 설치하면 기관 자료로 바꿔 쓸 수 있습니다.")
     files = (req.json or {}).get("files") or []
     if not files:
         raise HttpError(400, "올릴 파일이 없습니다")

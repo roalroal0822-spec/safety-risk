@@ -55,7 +55,7 @@ def _quote(text, words):
 
 def level(kb, r):
     if r >= kb.values["high"]:
-        return "bad", "작업 전 감소대책 완료"
+        return "bad", "작업 전 대책 완료 필요"
     if r >= kb.values["mid"]:
         return "warn", "작업 중 관리"
     return "ok", "현재 조치 유지"

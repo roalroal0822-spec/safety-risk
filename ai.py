@@ -148,7 +148,9 @@ def ask_facts(k, q, items, today):
             facts.append(f"판단 기준 {b['label']}: {b['value']} ({b['from']}" + (f", {b['basis']['reg']} {b['basis']['label']}" if b["basis"] else "") + ")")
             if b["basis"]:
                 lines.append(f"{b['label']}은 {b['value']}입니다({b['basis']['reg']} {b['basis']['label']}).")
-    for a in _articles(k, q):
+    status_q = bool(re.search(r"오늘|지금|시작|현황|남은|미완료", q))
+    status_only = status_q and not codes and not la["asked"]   # '오늘 시작 못 하는 작업?' 같은 현황 질문
+    for a in ([] if status_only else _articles(k, q)):
         c = k.cite(a)
         facts.append(f"{c['reg']} {c['label']}({c['title']}): {a.plain[:400]}")
         srcs.append({"file": c["file"], "loc": c["loc"], "quote": a.plain[:160]})
@@ -160,12 +162,34 @@ def ask_facts(k, q, items, today):
             srcs.append(i["src"])
     if incs:
         lines.append("최근 같은 위험의 아차사고: " + "; ".join(f"{i['date']} {i['fac']} {i['work']}" for i in incs) + ".")
-    if re.search(r"오늘|지금|시작|현황|남은|미완료", q):
-        for a in items[:6]:
+    if status_q:
+        hb = k.basis.get("high") or {}
+        hv = hb.get("value", 6)
+        rule_src = (f"{hb['basis']['reg']} {hb['basis']['label']}" if hb.get("basis") else "기본값")
+        stop, ok, empty = [], [], []
+        for a in items[:12]:
             st = assess.stats(a)
-            facts.append(f"평가 {a['created']} {a['fac']} {a['work']}: " + ("작업 시작 가능" if st["ready"] else "작업 전 조치 필요(" + ", ".join(st["blocked"] + st["weather_stops"]) + ")"))
+            name = f"{a['fac']} {a['work']}".strip()
+            if st["empty"]:
+                empty.append(name)
+                facts.append(f"평가 {a['created']} {name}: 확정한 위험요인 없음(평가 확인 필요)")
+            elif st["ready"]:
+                ok.append(name)
+                facts.append(f"평가 {a['created']} {name}: 작업 시작 가능, 남은 감소대책 {st['open']}건")
+            else:
+                bad = [f"{i['name']} {i['R']}" for i in a["items"] if i["confirmed"] and i["level"] == "bad" and not i["all_done"]]
+                why = (f"위험성 {hv} 이상 미완료: " + ", ".join(bad) if bad else "") + \
+                      (("; " if bad else "") + "기상 중지: " + ", ".join(st["weather_stops"]) if st["weather_stops"] else "")
+                stop.append(f"{name}({why}, 남은 감소대책 {st['open']}건)")
+                facts.append(f"평가 {a['created']} {name}: 작업 전 조치 필요({why}), 남은 감소대책 {st['open']}건")
         if items:
-            lines.append("평가 현황: " + "; ".join(f"{a['fac']} {a['work']} {'시작 가능' if assess.stats(a)['ready'] else '작업 전 조치 필요'}" for a in items[:4]) + ".")
+            facts.append(f"판단 기준 {hb.get('label', '작업 전 감소대책 완료 기준(위험성)')}: {hv} ({rule_src})")
+            head = (f"오늘 시작하면 안 되는 작업 {len(stop)}건: " + "; ".join(stop) + "." if stop else "오늘 시작을 막는 작업은 없습니다.")
+            lines.insert(0, head + f" 기준: 위험성 {hv} 이상은 작업 시작 전에 감소대책을 끝내야 합니다({rule_src})."
+                         + (f" 시작 가능 {len(ok)}건." if ok else "")
+                         + (f" 위험요인을 확정하지 않은 평가 {len(empty)}건({', '.join(empty)})은 먼저 평가를 확인하세요." if empty else ""))
+        elif status_only:
+            lines.append("아직 작성한 위험성평가가 없습니다. '새 위험성평가'에서 오늘 작업을 먼저 평가하세요.")
     if not lines:
         lines.append("제공된 근거(기관 안전보건관리규정·위험요인 목록·아차사고 기록·법령 원문)에서 이 질문에 해당하는 내용을 찾지 못해 답하지 않습니다. 근거 없이 추측한 답은 틀릴 수 있기 때문입니다.")
         lines.append('이렇게 물어보세요: "사다리 작업 안전 기준은?", "폭염 때 실외 작업은?", "밀폐공간 들어가기 전에 뭘 해야 해?", "오늘 시작 못 하는 작업 있어?"')
