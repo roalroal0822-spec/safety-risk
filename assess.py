@@ -14,7 +14,7 @@ import re
 import uuid
 from datetime import date
 
-from core.llm import LLMError
+from core.llm import LLMError, NoVisionError
 from kb import PERMIT, REG_TOPIC
 
 RX_HEIGHT = re.compile(r"(\d+(?:\.\d+)?)\s*(?:m|미터|M)(?![a-zA-Z²㎡])")
@@ -335,6 +335,8 @@ def make(kb, fac, dept, work, text, temp=None, llm=None, photos=None, photo_name
                 if got:
                     engine += "+사진(모델)"
                 notes += [f"사진 판독 제외: {d}" for d in dropped]
+            except NoVisionError as e:
+                notes.append(f"사진은 첨부만 했습니다({e})")
             except LLMError as e:
                 notes.append(f"사진은 첨부만 했습니다(모델이 사진을 읽지 못함: {e})")
     elif photos:

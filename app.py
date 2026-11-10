@@ -10,7 +10,7 @@ from core import webcommon
 from core.config import Config
 from core.export import export
 from core.loaders import load_bytes
-from core.llm import LLM, LLMError
+from core.llm import LLM, LLMError, NoVisionError
 from core.server import App, HttpError, Response, file_response
 from core.sources import safe_parts
 from core.pii import mask
@@ -1140,7 +1140,9 @@ def analyze_photo(k, raw, b64, text):
                 add(code, "AI 판독", what)
             engine.append("AI 판독")
             notes += [f"AI 판독 제외: {d}" for d in dropped]
-        except Exception as e:  # 모델이 사진을 못 읽거나 연결 실패
+        except NoVisionError as e:  # 글만 받는 모델(예: 솔라): 오류가 아니라 안내
+            notes.append(f"AI 판독 생략: {e}. 사진은 사물 인식으로 판독했습니다.")
+        except Exception as e:  # 연결 실패 등
             notes.append(f"AI 판독을 하지 못했습니다({e})")
     objs = None
     try:

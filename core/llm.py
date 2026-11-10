@@ -21,6 +21,15 @@ class LLMError(Exception):
     pass
 
 
+class NoVisionError(LLMError):
+    """연결한 모델이 사진 입력을 받지 않을 때(예: 업스테이지 솔라)."""
+
+
+def _no_vision(msg):
+    m = msg.lower()
+    return "image" in m and any(w in m for w in ("not allowed", "not support", "unsupported", "does not accept", "invalid"))
+
+
 # 행정안전부 AI 공통기반에서 지원(또는 지원 예정)하는 모델 계열.
 # 앱 기능은 계열과 무관하게 같고, 아래는 계열별 응답 차이를 흡수하기 위한 정보다.
 # ollama 이름은 예시이며, 실제 이름은 화면의 '모델 목록 불러오기'로 서버에서 받아 쓴다.
@@ -190,7 +199,12 @@ class LLM:
             msg = {"role": "user", "content": [{"type": "text", "text": prompt}] + [
                 {"type": "image_url", "image_url": {"url": f"data:image/{'png' if b.startswith('iVBOR') else 'jpeg'};base64," + b}}
                 for b in images_b64]}
-        out, _ = self._chat([msg], None, max_tokens, True)
+        try:
+            out, _ = self._chat([msg], None, max_tokens, True)
+        except LLMError as e:
+            if _no_vision(str(e)):
+                raise NoVisionError(f"연결한 모델({self.cfg.get('model') or '이름 없음'})은 사진 판독을 지원하지 않습니다") from e
+            raise
         obj = parse_json(strip_think(out))
         if obj is None:
             raise LLMError(f"모델이 올바른 JSON을 돌려주지 않았습니다: {out[:200]}")
