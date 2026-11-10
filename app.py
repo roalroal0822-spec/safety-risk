@@ -798,6 +798,7 @@ def apply_messages(req):
     r = feeds.messages()
     items = assessments()
     n = 0
+    ids = set()
     for m in r["items"]:
         for a in items:
             h = feeds.message_hits(m, a)
@@ -806,9 +807,10 @@ def apply_messages(req):
                                       "text": f"긴급재난문자({m['kind'] or '안내'}): {m['text'][:80]} → 다시 볼 위험요인: {', '.join(h)}",
                                       "src": None, "basis": None, "source": r["source"]})
                 n += 1
+                ids.add(a["id"])
     save_all(items)
     log("긴급재난문자 반영", f"수시 확인 표시 {n}건 ({r['source']})")
-    return {"added": n, "source": r["source"]}
+    return {"added": n, "assessments": len(ids), "source": r["source"]}
 
 
 # ------------------------------------------------------------ 아차사고
@@ -967,6 +969,14 @@ def _apply_actions(inc, fu):
         for m in done:
             # 조치 낱말과 위험요인 이름·감소대책 낱말이 가장 많이 겹치는 위험요인에 넣는다
             it = max(cand, key=lambda i: len(words(m["text"]) & words(i["name"] + " " + " ".join(k.hazards.get(i["code"], {}).get("measures", [])))))
+            same = [x for x in it["measures"] if x["text"].strip() == m["text"].strip()]
+            if same:  # 평가에 이미 있는 대책이면 새로 넣지 않고 그 대책을 완료로 바꾼다
+                for x in same:
+                    if not x.get("done"):
+                        x.update(done=True, completed=m.get("completed") or date.today().isoformat())
+                        if m.get("owner") and not x.get("owner"):
+                            x["owner"] = m["owner"]
+                continue
             t = f"{m['text']} (아차사고 {inc['date']} 조치)"
             if t not in {x["text"] for x in it["measures"]}:
                 it["measures"].append({"text": t, "done": True, "owner": m.get("owner", ""), "due": m.get("due", ""), "completed": m.get("completed") or date.today().isoformat()})

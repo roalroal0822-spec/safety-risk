@@ -214,6 +214,12 @@ def checks(c):
     c.call("POST", f"/api/incidents/{iid}/followup", {"actions": acts, "status": "완료"})
     la3 = c.call("GET", f"/api/assess/{la['id']}")
     yield "두 번 완료해도 감소대책은 한 번만", sum("아차사고" in m["text"] for i in la3["items"] for m in i["measures"]) == 2
+    old = next(m for i in la3["items"] if i["code"] == "H03" for m in i["measures"] if not m["done"] and "아차사고" not in m["text"])
+    ni2 = c.call("POST", "/api/incidents", {"fac": "종합체육센터", "work": "체육관 천장 조명 교체", "text": "분전반 문을 열다 손등이 단자에 닿을 뻔함", "result": "다침 없음"})
+    c.call("POST", f"/api/incidents/{ni2['incident']['id']}/followup", {"actions": [{"text": old["text"], "done": True}], "status": "완료"})
+    la4 = c.call("GET", f"/api/assess/{la['id']}")
+    same = [m for i in la4["items"] for m in i["measures"] if old["text"] in m["text"]]
+    yield "평가에 이미 있는 대책을 조치하면 새로 넣지 않고 그 대책을 '완료'로", len(same) == 1 and same[0]["done"]
     ca = c.call("POST", f"/api/incidents/{iid}/ai", {"part": "cause"})
     pr = c.call("POST", f"/api/incidents/{iid}/ai", {"part": "prevent"})
     yield "원인·재발 방지 초안(규칙)", ca["mode"] == "규칙 기반" and "감전" in ca["text"] and len(pr["lines"]) >= 3

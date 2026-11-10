@@ -109,7 +109,7 @@ async function renderMsgs(btn) {
   busy(btn, true, "확인 중");
   try { MSGS = await api("GET", "/api/feeds/messages"); } finally { busy(btn, false); }
   const box = $("#msgs-body");
-  const hits = MSGS.items.reduce((n, m) => n + m.hits.filter(h => !h.done).length, 0);
+  const hits = new Set(MSGS.items.flatMap(m => m.hits.filter(h => !h.done).map(h => h.id))).size;  // 같은 평가가 여러 문자에 걸려도 한 번만 센다
   box.replaceChildren(
     el("div", { class: "row small" }, el("span", { class: "muted", style: { flex: 1 } }, `${MSGS.region} · 오늘 ${MSGS.items.length}건`), srcTag(MSGS)),
     MSGS.note ? el("p", { class: "small muted" }, MSGS.note) : "",
@@ -120,7 +120,7 @@ async function renderMsgs(btn) {
           : el("div", { class: "small muted" }, "겹치는 위험요인이 있는 평가가 없습니다.")))) : [el("div", { class: "empty" }, "오늘 이 지역에 온 재난문자가 없습니다.")]),
     hits ? el("button", { class: "primary", id: "msgs-apply", style: { marginTop: "10px" }, onclick: async () => {
       const r = await api("POST", "/api/feeds/messages/apply", {});
-      toast(`${r.added}건의 평가에 '수시평가 필요'를 표시했습니다`);
+      toast(`평가 ${r.assessments ?? r.added}건에 '수시평가 필요'를 표시했습니다`);
       await load(); await renderMsgs($("#msgs-btn"));
     } }, `평가 ${hits}건에 수시평가 필요 표시하고 TBM에 넣기`) : "");
 }
