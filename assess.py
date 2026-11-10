@@ -78,15 +78,36 @@ def text_hazards(kb, full, cond, skip=()):
             continue
         if w:
             out.append((code, q, w))
+    # 떨어짐 낱말이 없어도 기준 높이 이상이라고 적었으면 떨어짐 위험으로 본다("높이 4m에서 게시물 부착")
+    if "H01" in kb.hazards and "H01" not in skip and not any(c == "H01" for c, _, _ in out) and cond.get("height", 0) >= kb.values["height"]:
+        m = max(RX_HEIGHT.finditer(full), key=lambda x: float(x.group(1)), default=None)
+        if m:
+            q, _ = _quote(full, [m.group(0)])
+            out.insert(0, ("H01", q or m.group(0), m.group(0).strip()))
     return out
 
 
+# 낱말 바로 뒤의 부정: "사다리 안 씀", "전기 작업 아님", "사다리를 쓰지 않고", "물기 없음"
+RX_NEG = re.compile(r"^(?:[은는을를도이가]|\s)*(?:작업|사용|이용)?\s*(?:[은는을를도]\s*)?"
+                    r"(?:안\s*(?:씀|쓰|씁|함|합|하|해)|\S{0,4}지\s*않|아님|아니|않|없음|없이|없다|없고|미사용|제외)")
+
+
+def _negated(part, w):
+    """구절 속 낱말이 모두 부정된 채로만 나오면 True."""
+    i = part.find(w)
+    while i >= 0:
+        if not RX_NEG.match(part[i + len(w):]):
+            return False
+        i = part.find(w, i + 1)
+    return True
+
+
 def _quote(text, words):
-    """낱말이 들어 있는 구절(쉼표·마침표로 나눈 한 토막)을 근거 문구로 돌려준다."""
+    """낱말이 들어 있는 구절(쉼표·마침표로 나눈 한 토막)을 근거 문구로 돌려준다. '사다리 안 씀'처럼 부정된 낱말은 근거로 쓰지 않는다."""
     parts = [p.strip() for p in re.split(r"[.,\n;]|(?<=다)\s", text or "") if p.strip()]
     for w in words:
         for p in parts:
-            if w in p:
+            if w in p and not _negated(p, w):
                 return p[:60], w
     return "", ""
 

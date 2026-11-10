@@ -190,9 +190,14 @@ def detect(raw, score=0.35):
     if "s" not in _SESS:
         _SESS["s"] = ort.InferenceSession(str(MODEL), providers=["CPUExecutionProvider"])
     sess = _SESS["s"]
-    im = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
-    W, H = im.size
     S = 416
+    im = Image.open(io.BytesIO(raw))
+    if im.format == "JPEG":
+        im.draft("RGB", (S * 2, S * 2))  # 휴대전화 고화질 사진도 작게 풀어 메모리를 아낀다(무료 서버 512MB)
+    elif im.width * im.height > 4_000_000:
+        im.thumbnail((S * 2, S * 2))
+    im = ImageOps.exif_transpose(im).convert("RGB")
+    W, H = im.size
     r = min(S / W, S / H)
     pad = np.full((S, S, 3), 114, dtype=np.uint8)
     rs = np.asarray(im.resize((max(1, int(W * r)), max(1, int(H * r))), Image.BILINEAR))

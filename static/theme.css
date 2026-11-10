@@ -597,3 +597,4 @@ button.big { padding: 12px 22px; font-size: 16px; }
 .ws .chip.ws-ai { border-style: dashed; }
 .ws-mini { margin-left: 4px; }
 @media (max-width: 640px) { .ws-row { grid-template-columns: 1fr; gap: 4px; } .ws-top, .ws-bottom { padding-left: 12px; padding-right: 12px; } }
+@media (max-width: 640px) { #task-pick { max-width: 100%; min-width: 0; flex: 1 1 100%; } }

@@ -95,7 +95,11 @@ def checks(c):
     lamp = next(t for t in pt["tasks"] if "조명" in t["work"] and t["fac"] == "종합체육센터")
     yield f"정기 평가 대상 작업 현황({pt['year']}년, 규정 {pt['basis']['basis']['label'] if pt['basis']['basis'] else '-'})", len(pt["tasks"]) == 9 and lamp["aid"] and pt["basis"]["basis"]
     st = c.call("POST", "/api/assess", {"fac": "문화예술회관", "work": "공연 무대 장치·조명 설치", "text": "무대 위 높이 7m 트러스에 조명기 12대를 매다는 작업. 3명이 작업, 관람객 없음"})
-    yield "높이 작업인데 떨어짐을 못 찾으면 질문", not any(i["code"] == "H01" for i in st["items"]) and any("7m" in x for x in st["questions"]) and not st["conditions"].get("open")
+    yield "떨어짐 낱말이 없어도 기준 높이(2m) 이상이면 떨어짐으로 봄(근거: 높이 7m)", any(i["code"] == "H01" and "7m" in i["word"] + i["quote"] for i in st["items"]) and not st["conditions"].get("open")
+    ng = c.call("POST", "/api/catalog/match", {"text": "바닥에 앉아서 서류 정리. 사다리 안 씀, 전기 작업 아님"})
+    yield "부정 표현('사다리 안 씀', '전기 작업 아님')은 위험으로 보지 않음", not ng["hazards"]
+    ng2 = c.call("POST", "/api/catalog/match", {"text": "전원 안 끄고 등기구 교체"})
+    yield "위험을 키우는 부정('전원 안 끄고')은 그대로 위험", {"H01", "H03"} <= {h["code"] for h in ng2["hazards"]}
     yield "설명에 없는 낱말은 보태지 않음", c.status("POST", f"/api/assess/{st['id']}/add", {"code": "H01", "word": "비계다리"}) == 400
     st2 = c.call("POST", f"/api/assess/{st['id']}/add", {"code": "H01", "word": "트러스"})
     h = next(i for i in st2["items"] if i["code"] == "H01")
